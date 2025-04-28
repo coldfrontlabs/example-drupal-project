@@ -1,0 +1,29 @@
+# This file is managed by dropfort/dropfort_build.
+# Delete this file and run `composer update dropfort/dropfort_build` to regenerate it.
+
+drush:
+  php:
+    minimum-version: 8.1.0
+command:
+  sql:
+    dump:
+      options:
+        # Uncomment to omit cache and similar tables (including during a sql:sync).
+        structure-tables-key: common
+    sync:
+      options:
+        # Uncomment to omit cache and similar tables (including during a sql:sync).
+        structure-tables-key: common
+  core:
+    rsync:
+      options:
+        omit-dir-times: TRUE
+sql:
+  structure-tables:
+    common:
+      - cache
+      - 'cache_*'
+      - history
+      - 'search_*'
+      - sessions
+      - watchdog

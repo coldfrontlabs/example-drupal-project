@@ -1,0 +1,299 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Update SolrCloud/Search API Solr.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Basic search api index update template.
+.update_search_api_template:
+  stage: pre_validate
+  allow_failure: true
+  environment:
+    action: access
+  script:
+    # Flag everything for reindexing.
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE search-api:reset-tracker
+    # Run the index.
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE search-api:index
+
+## Basic search api exclude rules.
+.update_search_api_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy"'
+      when: never
+    - if: '$TARGET_PLATFORM == "pantheon"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+
+## Update Solr Cloud collections and Search API template.
+.update_solrcloud_template:
+  stage: pre_validate
+  allow_failure: true
+  variables:
+    SEARCH_API_SOLR_ID: default_solr_server
+    SEARCH_API_SOLR_API_VERSION: '7'
+    SEARCH_API_SOLR_CONFIGSET: drupal
+    SOLR_NUM_SHARDS: 1
+  script:
+    - export DF_SOLR_ADMIN_INSTALLED=$(drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE pm:list --pipe --type=module --status=enabled --no-core --filter=search_api_solr_admin --format=json 2>/dev/null)
+    - >
+      if [ ! -z "$DF_SOLR_ADMIN_INSTALLED" ]; then
+        echo "Search API Solr Admin found. Updating..."
+        # Update any missing field types.
+        echo "Updating missing field types..."
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE search-api-solr:install-missing-fieldtypes
+        # Upload the config set.
+        echo "Uploading config set..."
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE search-api-solr:upload-configset $SEARCH_API_SOLR_ID --numShards=$SOLR_NUM_SHARDS
+        # Flag everything for reindexing.
+        echo "Flagging everything to reindexing..."
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE search-api:reset-tracker
+        # Run the index.
+        echo "Indexing..."
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE search-api:index
+        # Clear the cache.
+        echo "Clearing the cache..."
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE cr
+        echo "Update complete!"
+      else
+        echo "Search API Solr Admin not found."
+        echo "Please run 'drush en search_api_solr_admin' to use updating indexing process."
+        echo "Using old method. Updating..."
+        # Update any missing field types.
+        echo "Updating missing field types..."
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE search-api-solr:install-missing-fieldtypes
+        # Get config.
+        echo "Getting config..."
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE search-api-solr:get-server-config $SEARCH_API_SOLR_ID $DRUSH_ARB_BACKUP_DIR/solrconf.zip
+        # Load info about solr server.
+        echo "Loading Solr information..."
+        export SEARCH_API_SOLR_SERVER=$(drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE config:get search_api.server.$SEARCH_API_SOLR_ID backend_config.connector_config.host --include-overridden --format=string)
+        export SOLR_ADMIN=$(drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE config:get search_api.server.$SEARCH_API_SOLR_ID backend_config.connector_config.username --include-overridden --format=string)
+        export SOLR_ADMIN_PASSWD=$(drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE config:get search_api.server.$SEARCH_API_SOLR_ID backend_config.connector_config.password --include-overridden --format=string)
+        export SOLR_SCHEME=$(drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE config:get search_api.server.$SEARCH_API_SOLR_ID backend_config.connector_config.scheme --include-overridden --format=string)
+        # Can't update the config set if a collection is using it.
+        # Delete the existing collection.
+        echo "Deleting existing collection..."
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "curl $SOLR_CURL_OPTS --user $SOLR_ADMIN:$SOLR_ADMIN_PASSWD -X POST \"$SOLR_SCHEME://$SEARCH_API_SOLR_SERVER:8983/solr/admin/collections?action=DELETE&name=$SEARCH_API_SOLR_CONFIGSET\""
+        # Can't upload the same config set twice so we remove that one first.
+        # Delete existing config set
+        echo "Deleting existing config set..."
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "curl $SOLR_CURL_OPTS --user $SOLR_ADMIN:$SOLR_ADMIN_PASSWD -X POST \"$SOLR_SCHEME://$SEARCH_API_SOLR_SERVER:8983/solr/admin/configs?action=DELETE&name=$SEARCH_API_SOLR_CONFIGSET\""
+        # Recreate config set
+        echo "Recreating config set..."
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "curl $SOLR_CURL_OPTS --user $SOLR_ADMIN:$SOLR_ADMIN_PASSWD -X POST --header 'Content-Type:application/octet-stream' --data-binary @- \"$SOLR_SCHEME://$SEARCH_API_SOLR_SERVER:8983/solr/admin/configs?action=UPLOAD&name=$SEARCH_API_SOLR_CONFIGSET\" < $DRUSH_ARB_BACKUP_DIR/solrconf.zip"
+        # Recreate the collection
+        echo "Recreating collection..."
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "curl $SOLR_CURL_OPTS --user $SOLR_ADMIN:$SOLR_ADMIN_PASSWD -X POST \"$SOLR_SCHEME://$SEARCH_API_SOLR_SERVER:8983/solr/admin/collections?action=CREATE&name=$SEARCH_API_SOLR_CONFIGSET&autoAddReplicas=true&numShards=$SOLR_NUM_SHARDS&collection.configName=$SEARCH_API_SOLR_CONFIGSET\""
+        # 5. Reindex content
+        echo "Indexing..."
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE search-api:clear
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE search-api:disable-all
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE search-api:enable-all
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE search-api-solr:finalize-index --force
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE search-api-reindex
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE search-api-index
+        # Clear the cache.
+        echo "Clearing the cache..."
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE cr
+        echo "Update complete!"
+      fi
+
+## Solr Cloud exclude rules.
+.update_solrcloud_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy"'
+      when: never
+    - if: '$TARGET_PLATFORM == "pantheon"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+
+
+########################################
+# Jobs.
+########################################
+
+## Feature update.
+update_search_feature:
+  extends:
+    - .update_search_api_template
+    - .feature_detect_template
+  environment:
+    url: https://$CI_COMMIT_REF_SLUG.$DF_TLD
+  rules:
+    - if: '$SKIP_JOBS =~ /update_search_feature/'
+      when: never
+    - !reference [.update_search_api_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]
+
+## Dev update.
+update_search_dev:
+  extends:
+    - .update_search_api_template
+    - .dev_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /update_search_dev/'
+      when: never
+    - !reference [.update_search_api_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+## QA update.
+update_search_qa:
+  extends:
+    - .update_search_api_template
+    - .qa_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /update_search_qa/'
+      when: never
+    - !reference [.update_search_api_exclude_rules, rules]
+    - !reference [.qa_detect_no_env_exclude_rules, rules]
+    - !reference [.qa_detect_include_rules, rules]
+
+## Prod update.
+update_search_prod:
+  extends:
+    - .update_search_api_template
+    - .prod_detect_template
+  allow_failure: false
+  rules:
+    - if: '$SKIP_JOBS =~ /update_search_prod/'
+      when: never
+    - !reference [.update_search_api_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]
+
+
+########################################
+########################################
+
+
+########################################
+# Update Pantheon SolrCloud/Search API Solr.
+########################################
+
+# Basic Pantheon search api index update template.
+.update_pantheon_search_api_template:
+  stage: pre_validate
+  allow_failure: true
+  script:
+    ## Install terminus to communicate with the Pantheon servers.
+    - mkdir ~/terminus
+    - cd ~/terminus
+    - curl -O https://raw.githubusercontent.com/pantheon-systems/terminus-installer/master/builds/installer.phar && php installer.phar install
+    - vendor/bin/terminus auth:login --machine-token=$MACHINE_TOKEN
+    - vendor/bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- search-api-reindex
+    - vendor/bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- search-api-index
+
+## Basic Pantheon search api exclude rules.
+.update_pantheon_search_api_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy"'
+      when: never
+    - if: '$TARGET_PLATFORM != "pantheon"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+
+## Update Pantheon Solr Cloud collections and Search API template.
+.update_pantheon_solrcloud_template:
+  stage: pre_validate
+  allow_failure: true
+  variables:
+    SEARCH_API_SOLR_ID: default_solr_server
+    SEARCH_API_SOLR_API_VERSION: '7'
+    SEARCH_API_SOLR_CONFIGSET: drupal
+    SOLR_NUM_SHARDS: 1
+  script:
+    echo "Placeholder for Pantheon solrcloud update script."
+
+## Pantheon Solr Cloud exclude rules.
+.update_pantheon_solrcloud_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy"'
+      when: never
+    - if: '$TARGET_PLATFORM != "pantheon"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+
+########################################
+# Jobs.
+########################################
+
+## Dev update.
+update_pantheon_search_dev:
+  extends:
+    - .update_pantheon_solrcloud_template
+    - .dev_detect_template
+  variables:
+    DRUSH_ALIAS_TYPE: dev
+  rules:
+    - if: '$SKIP_JOBS =~ /update_pantheon_search_dev/'
+      when: never
+    - !reference [.update_pantheon_search_api_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+## QA update.
+update_pantheon_search_qa:
+  extends:
+    - .update_pantheon_solrcloud_template
+    - .qa_detect_template
+  variables:
+    DRUSH_ALIAS_TYPE: test
+  rules:
+    - if: '$SKIP_JOBS =~ /update_pantheon_search_qa/'
+      when: never
+    - !reference [.update_pantheon_search_api_exclude_rules, rules]
+    - !reference [.qa_detect_no_env_exclude_rules, rules]
+    - !reference [.qa_detect_include_rules, rules]
+
+## Prod update.
+update_pantheon_search_prod:
+  extends:
+    - .update_pantheon_solrcloud_template
+    - .prod_detect_template
+  variables:
+    DRUSH_ALIAS_TYPE: live
+  allow_failure: false
+  rules:
+    - if: '$SKIP_JOBS =~ /update_pantheon_search_prod/'
+      when: never
+    - !reference [.update_pantheon_search_api_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]

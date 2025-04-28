@@ -1,0 +1,122 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Drupal core requirements test.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Core requirements check template.
+.drush_core_requirements_template:
+  variables:
+    GIT_STRATEGY: none
+  allow_failure: true
+  environment:
+    action: access
+  script:
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE core:requirements --severity=2 | tee testing/security/reports/core_requirements_audit.txt
+    - if [[ `drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "drush core:requirements --fields=title --severity=2 --pipe | wc -l"` == 0 ]]; then echo "Success!"; else exit 1; fi
+  stage: validate
+  artifacts:
+    name: "$CI_PROJECT_NAME-$CI_COMMIT_REF_NAME-core_requirements_audit"
+    paths:
+      - testing/security/reports
+    when: on_failure
+
+## Core requirements exclude rules.
+.drush_core_requirements_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy" && $TARGET_PIPELINE != "validation"'
+      when: never
+    - if: '$SKIP_VALIDATE == "true"'
+      when: never
+    - if: '$TARGET_PLATFORM == "acquia"'
+      when: never
+    - if: '$TARGET_PLATFORM == "pantheon"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[skip validate\]/'
+      when: never
+
+########################################
+# Jobs.
+########################################
+
+## Feature core requirements validation.
+validate_core_requirements_drupal_feature:
+  variables:
+    DRUSH_ALIAS_TYPE: $CI_COMMIT_REF_SLUG
+  extends:
+    - .drush_core_requirements_template
+    - .feature_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_core_requirements_drupal_feature/'
+      when: never
+    - !reference [.drush_core_requirements_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]
+
+## Dev core requirements validation.
+validate_core_requirements_drupal_dev:
+  variables:
+    DRUSH_ALIAS_TYPE: dev
+  extends:
+    - .drush_core_requirements_template
+    - .dev_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_core_requirements_drupal_dev/'
+      when: never
+    - !reference [.drush_core_requirements_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+## QA core requirements validation.
+validate_core_requirements_drupal_qa:
+  variables:
+    DRUSH_ALIAS_TYPE: qa
+  extends:
+    - .drush_core_requirements_template
+    - .qa_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_core_requirements_drupal_qa/'
+      when: never
+    - !reference [.drush_core_requirements_exclude_rules, rules]
+    - !reference [.qa_detect_no_env_exclude_rules, rules]
+    - !reference [.qa_detect_include_rules, rules]
+
+## Prod core requirements validation.
+validate_core_requirements_drupal_prod:
+  variables:
+    DRUSH_ALIAS_TYPE: prod
+  extends:
+    - .drush_core_requirements_template
+    - .prod_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_core_requirements_drupal_prod/'
+      when: never
+    - !reference [.drush_core_requirements_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]

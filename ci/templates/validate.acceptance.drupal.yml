@@ -1,0 +1,168 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Drupal acceptance tests.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Test PHP site functionality template.
+.acceptance_tests_template:
+  stage: validate
+  environment:
+    action: access
+  variables:
+    DF_VALIDATE_ARGS: --no-exit
+    # HUB_HOST: selenium
+    # HUB_PORT: 4444
+    DOCKER_SHM_SIZE: 2147483648
+    START_XVFB: 'false'
+    DF_CODECEPT_ENV: desktop
+  artifacts:
+    name: "$CI_PROJECT_NAME-$CI_COMMIT_REF_NAME-acceptance"
+    paths:
+      - testing/codeception/tests/_output
+    reports:
+      junit: testing/codeception/tests/_output/report.xml
+    when: always
+  script:
+    # We run the acceptance test process with --no-exit so that we can set the process exit code on the runner after the tests are run.
+    - echo $DF_VALIDATE_ARGS
+    # SSH to the drupal server and run the codeception tests with a tunnel set up to access the selenium grid.
+    - export DF_TEST_URL=`drush sa @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE --format=json | jq .[].uri`
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS -R 4444:127.0.0.1:4444 -o SendEnv DF_TEST_URL -o SetEnv 'DF_SELENIUM_HOST=127.0.0.1 DF_SELENIUM_PORT=4444' " @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "cd ../ && bin/codecept run acceptance -c testing/codeception/codeception.yml --env=$DF_CODECEPT_BROWSER,$DF_CODECEPT_ENV" || true
+    # Copy the contents of the testing folder to the runner so that the test reports can be uploaded as artifacts.
+    # @todo swap for npm run test:acceptance:php ?
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" rsync @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE:../testing/codeception/tests/ testing/codeception/tests  -- --ignore-times --no-owner --no-group --no-perms --no-t -O
+    # Return an exit code equal to the number of 'not ok' in the test log file (so if there are failures, a non-zero exit code will be returned)
+    - exit $(grep -h -r -c --include \*.tap.log 'not ok' testing)
+
+# Additional templates to setup multiple tests against different browsers.
+
+## Chrome.
+.acceptance_tests_template_chrome:
+  extends:
+    - .acceptance_tests_template
+  services:
+    -
+      name: selenium/standalone-chrome
+      alias: selenium
+  variables:
+    DF_CODECEPT_BROWSER: chrome
+
+## Firefox.
+.acceptance_tests_template_firefox:
+  extends:
+    - .acceptance_tests_template
+  services:
+    -
+      name: selenium/standalone-firefox
+      alias: selenium
+  variables:
+    DF_CODECEPT_BROWSER: firefox
+
+## Edge.
+.acceptance_tests_template_edge:
+  extends:
+    - .acceptance_tests_template
+  services:
+    -
+      name: selenium/standalone-edge
+      alias: selenium
+  variables:
+    DF_CODECEPT_BROWSER: edge
+
+## Acceptance tests exclude rules.
+.acceptance_tests_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy" && $TARGET_PIPELINE != "validation"'
+      when: never
+    - if: '$SKIP_VALIDATE == "true"'
+      when: never
+    - if: '$TARGET_PLATFORM == "acquia"'
+      when: never
+    - if: '$TARGET_PLATFORM == "pantheon"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[skip validate\]/'
+      when: never
+
+
+########################################
+# Jobs.
+########################################
+
+## Feature acceptance tests.
+validate_feature_acceptance:
+  extends:
+    - .acceptance_tests_template_chrome
+    - .feature_detect_template
+  artifacts:
+    expire_in: 2 days
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_feature_acceptance/'
+      when: never
+    - !reference [.acceptance_tests_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]
+
+## Dev acceptance tests.
+validate_dev_acceptance:
+  extends:
+    - .acceptance_tests_template_chrome
+    - .dev_detect_template
+  artifacts:
+    expire_in: 2 days
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_dev_acceptance/'
+      when: never
+    - !reference [.acceptance_tests_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+## QA acceptance tests.
+validate_qa_acceptance:
+  extends:
+    - .acceptance_tests_template_chrome
+    - .qa_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_qa_acceptance/'
+      when: never
+    - !reference [.acceptance_tests_exclude_rules, rules]
+    - !reference [.qa_detect_no_env_exclude_rules, rules]
+    - !reference [.qa_detect_include_rules, rules]
+
+## Prod acceptance tests.
+validate_prod_acceptance:
+  extends:
+    - .acceptance_tests_template_chrome
+    - .prod_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_prod_acceptance/'
+      when: never
+    - !reference [.acceptance_tests_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]

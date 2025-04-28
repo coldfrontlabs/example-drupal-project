@@ -1,0 +1,105 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Get a Drupal database archive.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Get database template.
+.get_database_template:
+  stage: task
+  when: manual
+  allow_failure: true
+  script:
+    - composer install --optimize-autoloader
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE sql-dump --result-file=/tmp/db.sql --gzip
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" rsync @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE:/tmp/db.sql.gz ./ -- --ignore-times --no-owner --no-group --no-perms --no-t -O --delete
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "rm -f /tmp/db.sql.gz"
+
+  artifacts:
+    name: "$CI_PROJECT_NAME-$DRUSH_ALIAS_TYPE-db"
+    paths:
+      - db.sql.gz
+    expire_in: 1hr
+
+## Get database exclude rules.
+.get_database_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PLATFORM == "pantheon"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+
+## Get database include rules.
+.get_database_include_rules:
+  rules:
+    - if: '$TARGET_PIPELINE == "all"'
+    - if: '$TARGET_PIPELINE == "build_and_deploy"'
+
+
+########################################
+# Jobs.
+########################################
+
+## Get Dev database.
+get_dev_database:
+  extends:
+    - .dev_detect_template
+    - .get_database_template
+  variables:
+    DRUSH_ALIAS_TYPE: dev
+  rules:
+    - if: '$SKIP_JOBS =~ /get_dev_database/'
+      when: never
+    - !reference [.get_database_exclude_rules, rules]
+    - !reference [.get_database_include_rules, rules]
+
+## Get Dev database.
+get_qa_database:
+  extends:
+    - .qa_detect_template
+    - .get_database_template
+  variables:
+    DRUSH_ALIAS_TYPE: dev
+  rules:
+    - if: '$SKIP_JOBS =~ /get_qa_database/'
+      when: never
+    - !reference [.get_database_exclude_rules, rules]
+    - !reference [.get_database_include_rules, rules]
+
+## Get Prod database.
+get_prod_database:
+  extends:
+    - .prod_detect_template
+    - .get_database_template
+  rules:
+    - if: '$SKIP_JOBS =~ /get_prod_database/'
+      when: never
+    - !reference [.get_database_exclude_rules, rules]
+    - !reference [.get_database_include_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]

@@ -1,0 +1,188 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Apply Dependency Updates.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Dependency update template.
+.dependency_update_template:
+  stage: post_security
+  services:
+    - name: mariadb:latest
+      alias: mariadb
+  variables:
+    GIT_STRATEGY: none
+    DF_DRUPAL_WEBROOT: web
+    MYSQL_ROOT_PASSWORD: password
+    MYSQL_DATABASE: drupal
+    MYSQL_USER: drupal
+    MYSQL_PASSWORD: drupal
+    MYSQL_WAIT_TIMEOUT: 6000
+    DB_DRIVER: mysql
+    DB_HOST: mariadb
+    DB_NAME: drupal
+    DB_PASSWORD: drupal
+    DB_USER: drupal
+    DF_DRUPAL_CONFIG_DIR: ../config/sync
+    DF_ENV_TYPE: prod
+    DF_AUTO_UPDATER_OPTIONS: --package-managers=composer,npm --update-drupal
+  before_script:
+    - touch /tmp/test.txt
+    - eval $(ssh-agent -s)
+    - ssh-add <(echo "$COLDFRONT_SUPPORT_SSH" | base64 --decode)
+    - test ! -z "$RUNNER_DEPLOY_KEY" && ssh-add <(echo "$RUNNER_DEPLOY_KEY" | base64 --decode)
+    - test ! -z "$RUNNER_DEPLOY_KEY_DEV" && ssh-add <(echo "$RUNNER_DEPLOY_KEY_DEV" | base64 --decode)
+    - ssh-add -l
+    - mkdir -p ~/.ssh || true
+    # Add known hosts entries.
+    - touch ~/.ssh/known_hosts
+    - touch ~/.ssh/config
+    - chmod 700 ~/.ssh
+    - chmod 600 ~/.ssh/*
+    - echo "$SSH_KNOWN_HOSTS" | base64 --decode >> ~/.ssh/known_hosts
+    - git config --global user.email "support@coldfrontslabs.ca"
+    - git config --global user.name "Coldfront Support"
+    - echo $CI_SERVER_HOST:$CI_PROJECT_PATH
+    - git clone git@$CI_SERVER_HOST:$CI_PROJECT_PATH.git
+    - cd $CI_PROJECT_NAME
+    # install correct version of composer
+    - mkdir -p bin
+    - export PATH="$(pwd)/bin:$(pwd)/vendor/bin:$PATH"
+    - export COMPOSER_PATH=$(which composer)
+    - >
+      if [ -z $COMPOSER_PATH ] || [ $COMPOSER_PATH == '/usr/local/bin/composer' ]; then
+        php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" \
+        && php -r "if (hash_file('SHA384', 'composer-setup.php') === '$COMPOSER_SHA') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;" \
+        && php composer-setup.php --install-dir=bin --filename=composer \
+        && php -r "unlink('composer-setup.php');" \
+        && echo "Composer installed" \
+        && composer self-update $COMPOSER_VERSION
+      fi
+    - composer --
+  artifacts:
+    name: "$CI_PROJECT_NAME-$CI_COMMIT_REF_NAME-auto-updates"
+    paths:
+      - auto-updater.txt
+    when: on_failure
+
+## Dependency update MR script.
+.dependency_update_mr_script:
+  script:
+    # Determine assignee id for merge request
+    - >
+      if [[ $DF_SUPPORT_ASSIGNEE ]]; then
+        DF_ASSIGNEE_ID=$(curl --request GET --header "PRIVATE-TOKEN: $DF_CI_TOKEN" https://$CI_SERVER_HOST/api/v4/users?username=$DF_SUPPORT_ASSIGNEE | jq -r .[].id)
+      else
+        DF_ASSIGNEE_ID=$(curl --request GET --header "PRIVATE-TOKEN: $DF_CI_TOKEN" https://$CI_SERVER_HOST/api/v4/users?username=coldfrontsupport | jq -r .[].id)
+      fi
+    - >
+      DF_MR_RESPONSE=$(curl --request POST --header "PRIVATE-TOKEN: $DF_CI_TOKEN" --data-urlencode "title=$DF_MR_TITLE" --data-urlencode "source_branch=$DF_BRANCH_NAME" --data-urlencode "target_branch=$CI_DEFAULT_BRANCH" --data-urlencode "description=$DF_MR_DESCRIPTION" --data-urlencode "assignee_id=$DF_ASSIGNEE_ID" https://$CI_SERVER_HOST/api/v4/projects/$CI_PROJECT_ID/merge_requests)
+    - DF_MR_URL=$(echo $DF_MR_RESPONSE | jq -r .web_url)
+    - echo "Created MR $DF_MR_URL"
+
+## Dependency update exclude rules.
+.dependency_update_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PLATFORM == "pantheon"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+
+## Dependency update include rules.
+.dependency_update_include_rules:
+  rules:
+    - if: '$TARGET_PIPELINE == "security_checks"'
+    - if: '$TARGET_PIPELINE == "outdated"'
+
+
+########################################
+# Jobs.
+########################################
+
+## General (non-security related) updates.
+apply_general_updates:
+  extends: .dependency_update_template
+  when: on_success
+  script:
+    - DF_DATE=$(date +%F)
+    - DF_BRANCH_NAME=$CI_PROJECT_NAME-general-updates-$DF_DATE
+    - git checkout -b $DF_BRANCH_NAME
+    - |
+      npm install $BUILD_NPM_OPTIONS &
+      composer install $BUILD_COMPOSER_OPTIONS
+    - wait
+    - mkdir -p ~/.ssh || true
+    - echo -e "\nHost $(drush sa @$DRUSH_ALIAS_GROUP.$DF_ENV_TYPE --format=json | jq -r '.[].host')\n  User $DRUPAL_USER\n" >> ~/.ssh/config
+    - chmod 600 ~/.ssh/config
+    # Add known hosts entries.
+    - touch ~/.ssh/known_hosts
+    - chmod 700 ~/.ssh
+    - chmod 600 ~/.ssh/*
+    - echo "$SSH_KNOWN_HOSTS" | base64 --decode >> ~/.ssh/known_hosts
+    - php scripts/auto-updater.php --type=general $DF_AUTO_UPDATER_OPTIONS
+    - git push origin $DF_BRANCH_NAME
+    # Create description for merge request
+    - export DF_MR_DESCRIPTION=$(cat ./auto-updater.txt)
+    - |
+      export DF_MR_TITLE="build: apply general updates"
+    - !reference [.dependency_update_mr_script, script]
+  rules:
+    - if: '$SKIP_JOBS =~ /apply_general_updates/'
+      when: never
+    - !reference [.dependency_update_exclude_rules, rules]
+    - !reference [.dependency_update_include_rules, rules]
+
+## Security updates.
+apply_security_updates:
+  extends: .dependency_update_template
+  variables:
+    DF_AUTO_UPDATER_OPTIONS: --package-managers=composer,npm --update-drupal
+  when: on_failure
+  script:
+    - DF_DATE=$(date +%F)
+    - DF_BRANCH_NAME=$CI_PROJECT_NAME-security-updates-$DF_DATE
+    - git checkout -b $DF_BRANCH_NAME
+    - |
+      npm install $BUILD_NPM_OPTIONS &
+      composer install $BUILD_COMPOSER_OPTIONS
+    - wait
+    - echo -e "\nHost $(drush sa @$DRUSH_ALIAS_GROUP.$DF_ENV_TYPE --format=json | jq -r '.[].host')\n  User $DRUPAL_USER\n" >> ~/.ssh/config
+    - chmod 600 ~/.ssh/config
+    - php scripts/auto-updater.php --type=security $DF_AUTO_UPDATER_OPTIONS
+    - git push origin $DF_BRANCH_NAME
+    # Create description for merge request
+    - export DF_MR_DESCRIPTION=$(cat ./auto-updater.txt)
+    - |
+      export DF_MR_TITLE="build: apply security updates"
+    - !reference [.dependency_update_mr_script, script]
+  rules:
+    - if: '$SKIP_JOBS =~ /apply_security_updates/'
+      when: never
+    - !reference [.dependency_update_exclude_rules, rules]
+    - !reference [.dependency_update_include_rules, rules]

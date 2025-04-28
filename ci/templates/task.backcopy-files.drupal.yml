@@ -1,0 +1,93 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Backcopy Drupal files.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Backcopy files template.
+.backcopy_files_template:
+  stage: task
+  variables:
+    DRUSH_BACKCOPY_SOURCE: prod
+  when: manual
+  allow_failure: true
+  script:
+    - composer install --optimize-autoloader
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "sudo /usr/local/bin/drupal-fix-permissions.sh --drupal_user=$DRUPAL_USER --httpd_group=$WEB_GROUP"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_BACKCOPY_SOURCE rsync @self:%files/ @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE:%files -- $DRUSH_RSYNC_OPTIONS
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "sudo /usr/local/bin/drupal-fix-permissions.sh --drupal_user=$DRUPAL_USER --httpd_group=$WEB_GROUP"
+
+## Backcopy files exclude rules.
+.backcopy_files_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PLATFORM == "pantheon"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+
+## Backcopy files include rules.
+.backcopy_files_include_rules:
+  rules:
+    - if: '$TARGET_PIPELINE == "all"'
+    - if: '$TARGET_PIPELINE == "build_and_deploy"'
+
+########################################
+# Jobs.
+########################################
+
+## Backcopy files from Prod to Dev.
+backcopy_files_prod_to_dev:
+  extends:
+    - .prod_detect_template
+    - .backcopy_data_template
+  variables:
+    DRUSH_ALIAS_TYPE: dev
+    DRUSH_BACKCOPY_SOURCE: prod
+  rules:
+    - if: '$SKIP_JOBS =~ /backcopy_files_prod_to_dev/'
+      when: never
+    - !reference [.backcopy_files_exclude_rules, rules]
+    - !reference [.backcopy_files_include_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]
+
+## Backcopy files from Prod to QA.
+backcopy_files_prod_to_qa:
+  extends:
+    - .prod_detect_template
+    - .backcopy_data_template
+  variables:
+    DRUSH_ALIAS_TYPE: qa
+    DRUSH_BACKCOPY_SOURCE: prod
+  rules:
+    - if: '$SKIP_JOBS =~ /backcopy_files_prod_to_qa/'
+      when: never
+    - !reference [.backcopy_files_exclude_rules, rules]
+    - !reference [.backcopy_files_include_rules, rules]
+    - !reference [.qa_detect_no_env_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]

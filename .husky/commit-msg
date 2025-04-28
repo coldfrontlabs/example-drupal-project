@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+[ -n "$CI" ] && exit 0
+
+npx --no-install commitlint --edit $1

@@ -1,0 +1,20 @@
+local:
+  host: drupal.docker.localhost
+  options:
+    command-specific:
+      sql-dump:
+        gzip: true
+    os: Linux
+    target-command-specific:
+      rsync:
+        include-vcs: true
+    variables:
+      mail_system:
+        default-system: TestingMailSystem
+  paths:
+    webroot: /var/www/html
+    files: /var/www/html/web/sites/default/files
+  root: /var/www/html/web
+  uri: 'http://drupal.docker.localhost:8000'
+  ssh:
+    options: '-A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -q'

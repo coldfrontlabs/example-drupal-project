@@ -1,0 +1,326 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Drupal deployment.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Initial deployment template.
+.initial_drupal:
+  stage: pre_deploy
+  variables:
+    DRUPAL_BUILD_SITES_DIR: $CI_PROJECT_NAME/sites
+    DRUPAL_SITE_ROOT: ""
+    DF_INITIAL_PROFILE: ''
+    DF_INITIAL_OPTIONS: --existing-config --config-dir=../config/sync --db-su=$DB_ROOT --db-su-pw=$DB_ROOT_PW
+    DF_INITIAL_DB_URL: mysql://$CI_PROJECT_NAME:weakpasswordtochange12353267995458956@localhost/$CI_PROJECT_NAME
+    DF_INITIAL_SITE: default
+    GIT_STRATEGY: none
+  environment:
+    url: https://$DF_TLD
+    action: start
+  script:
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh --cd="/" exit
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" --exclude-paths=$DF_DRUPAL_WEBROOT/sites rsync ./ @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE:%webroot -- --delete --include=core
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "mkdir -p sites/$DF_INITIAL_SITE"
+    - echo -e "\x24settings['config_sync_directory'] = '../config/sync';" >> ./$DF_DRUPAL_WEBROOT/sites/default/default.settings.php
+    - echo -e "\x24config['config_split.config_split.feature']['status'] = TRUE;" >> ./$DF_DRUPAL_WEBROOT/sites/default/default.settings.php
+    - echo -e "\x24config['config_split.config_split.dev']['status'] = TRUE;" >> ./$DF_DRUPAL_WEBROOT/sites/default/default.settings.php
+    - echo -e "\x24config['config_split.config_split.qa']['status'] = FALSE;" >> ./$DF_DRUPAL_WEBROOT/sites/default/default.settings.php
+    - echo -e "\x24config['config_split.config_split.prod']['status'] = FALSE;" >> ./$DF_DRUPAL_WEBROOT/sites/default/default.settings.php
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" rsync ./$DF_DRUPAL_WEBROOT/sites/default/default.settings.php @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE:sites/default/ -- --delete --include=core
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" rsync ./$DF_DRUPAL_WEBROOT/sites/default/default.services.yml @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE:sites/default/ -- --delete --include=core
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" rsync ./$DF_DRUPAL_WEBROOT/sites/example.sites.php @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE:sites/ -- --delete --include=core
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" rsync ./$DF_DRUPAL_WEBROOT/sites/example.settings.local.php @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE:sites/ -- --delete --include=core
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "sudo /usr/local/bin/drupal-fix-permissions.sh --drupal_user=$DRUPAL_USER --httpd_group=$WEB_GROUP"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "drush si $DF_INITIAL_PROFILE --sites-subdir=$DF_INITIAL_SITE $DF_INITIAL_OPTIONS --db-url=$DF_INITIAL_DB_URL"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "sudo /usr/local/bin/drupal-fix-permissions.sh --drupal_user=$DRUPAL_USER --httpd_group=$WEB_GROUP"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE cr
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE config-status
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE config-export --destination=../config/sync
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE status
+    - >
+      if [ "$DF_ENV_TYPE" == "feature" ]; then
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "git remote set-url origin git@$CI_SERVER_HOST:$CI_PROJECT_PATH.git"
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_BACKCOPY_SOURCE sql-dump --result-file=/tmp/$DRUSH_BACKCOPY_SOURCE-$DRUSH_ALIAS_TYPE.sql
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE sql-sync @$DRUSH_ALIAS_GROUP.$DRUSH_BACKCOPY_SOURCE @self --no-dump --no-sync --source-dump=/tmp/$DRUSH_BACKCOPY_SOURCE-$DRUSH_ALIAS_TYPE.sql --target-dump=/tmp/$DRUSH_BACKCOPY_SOURCE-$DRUSH_ALIAS_TYPE.sql
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_BACKCOPY_SOURCE ssh "rm -f /tmp/$DRUSH_BACKCOPY_SOURCE-$DRUSH_ALIAS_TYPE.sql"
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE rsync @$DRUSH_ALIAS_GROUP.$DRUSH_BACKCOPY_SOURCE:%files/ @self:sites/default/files -- --include=core || true
+      fi
+
+## Deployment template.
+.deploy_drupal_template:
+  stage: deploy
+  variables:
+    DRUPAL_BUILD_SITES_DIR: $CI_PROJECT_NAME/sites
+    DRUPAL_SITE_ROOT: ""
+    GIT_STRATEGY: none
+    DF_SKIP_LOCAL_BACKUP: ""
+  environment:
+    url: https://$DF_TLD
+    action: start
+  script:
+    - DF_TLD=${CI_COMMIT_REF_SLUG#'http://'}
+    - DF_TLD=${DF_TLD#'https://'}
+    - DRUPAL_SITE_ROOT="$DF_FEAT_DOCROOT/$DRUSH_ALIAS_URI/$DF_DRUPAL_WEBROOT"
+    - test -n "$DRUPAL_SITE_ROOT"
+    - DRUSH_ENV_WEBROOT=`drush sa @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE --format=json | jq .[].paths.webroot`
+    - DRUSH_ENV_URI=`drush sa @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE --format=json | jq .[].uri`
+    - DF_TABLES=`drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE sql:query "SHOW TABLES"`
+    - DF_DRUPAL_TABLE_COUNT=`echo $DF_TABLES | wc -w`
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh --cd="/" exit
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE status
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "echo `date +%s` > deploy.lock"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" rsync $DRUSH_DIR_PATH/ @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE:%webroot/drush -- --delete --include=core
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE cc drush || true
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "mkdir -p $DRUSH_ARB_BACKUP_DIR"
+    - >
+      if [ "$DF_DRUPAL_TABLE_COUNT" -gt 20 ]; then
+  
+        if [ -z "$DF_SKIP_MAINTENANCE_MODE_ON_SYNC" ]; then
+          drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE state:set system.maintenance_mode 1 --input-format=integer
+        fi
+
+        if [ -z "$DF_SKIP_LOCAL_BACKUP" ]; then
+          drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "php -f ../drush/scripts/archive.php $DRUSH_ARB_BACKUP_DIR"
+        fi
+      fi
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "sudo /usr/local/bin/drupal-fix-permissions.sh --drupal_user=$DRUPAL_USER --httpd_group=$WEB_GROUP"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" --exclude-paths=$DF_DRUPAL_WEBROOT/sites rsync ./ @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE:%webroot -- --delete --exclude-from=.rsync-exclude --include=core
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" rsync ./config/ @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE:%webroot/config/ -- --delete --include=core
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "grep -qF -- 'DRUSH_OPTIONS_URI=$DRUSH_ENV_URI' $DRUSH_ENV_WEBROOT/.env || echo 'DRUSH_OPTIONS_URI=$DRUSH_ENV_URI' >> $DRUSH_ENV_WEBROOT/.env"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE cr
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE status
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "sudo /usr/local/bin/drupal-fix-permissions.sh --drupal_user=$DRUPAL_USER --httpd_group=$WEB_GROUP"
+    - >
+      if [ "$DF_DRUPAL_TABLE_COUNT" -gt 20 ]; then
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE state:set system.maintenance_mode 0 --input-format=integer
+      fi
+
+## Admin block.
+.admin_block_template:
+  after_script:
+    - eval $(ssh-agent -s)
+    - test ! -z "$RUNNER_DEPLOY_KEY" && ssh-add <(echo "$RUNNER_DEPLOY_KEY" | base64 --decode)
+    - test ! -z "$RUNNER_DEPLOY_KEY_DEV" && ssh-add <(echo "$RUNNER_DEPLOY_KEY_DEV" | base64 --decode)
+    - ssh-add -l
+    - export PATH="$(pwd)/bin:$(pwd)/vendor/bin:$PATH"
+    - export DF_ADMIN_USER=`drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "drush uinf --uid=1 --format=json" | jq .[].name -r`
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ublk $DF_ADMIN_USER
+
+## Deployment exclude rules.
+.deploy_drupal_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy"'
+      when: never
+    - if: '$TARGET_PLATFORM == "pantheon"'
+      when: never
+    - if: '$TARGET_PLATFORM == "acquia"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+
+########################################
+## Initial deploy phase stages.
+########################################
+
+## Initial deploy feature environment.
+initial_deploy_feature:
+  extends:
+    - .feature_detect_template
+    - .initial_drupal
+  variables:
+    DRUSH_ALIAS_TYPE: $CI_COMMIT_REF_SLUG
+    DF_INITIAL_PROFILE: minimal
+    DF_INITIAL_OPTIONS: --db-su=$DB_ROOT --db-su-pw=$DB_ROOT_PW
+    DRUSH_BACKCOPY_SOURCE: dev
+  before_script:
+    - eval $(ssh-agent -s)
+    - test ! -z "$RUNNER_DEPLOY_KEY" && ssh-add <(echo "$RUNNER_DEPLOY_KEY" | base64 --decode)
+    - test ! -z "$RUNNER_DEPLOY_KEY_DEV" && ssh-add <(echo "$RUNNER_DEPLOY_KEY_DEV" | base64 --decode)
+    - ssh-add -l
+    - export PATH="$(pwd)/bin:$(pwd)/vendor/bin:$PATH"
+    # See if the directory exists in /var/www/html/dev
+    - FIND_ENV=$(drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.dev ssh "cd $DF_FEAT_DOCROOT && find . -maxdepth 1 -type d -name $CI_COMMIT_REF_SLUG | sed -e 's|./*||'")
+    - echo $FIND_ENV
+    - >
+      if [ "$FIND_ENV" == $CI_COMMIT_REF_SLUG ]; then
+        echo "Feature environment exists"
+        exit 0
+      else
+        echo "Creating feature environment"
+        export DF_FEAT_ENV_DB_NAME="feat"$(echo $CI_COMMIT_REF_SLUG | md5sum | cut -d' ' -f1)
+        export DF_INITIAL_DB_URL=$(echo mysql://$DB_FEAT:$DB_FEAT_PW@localhost/$DF_FEAT_ENV_DB_NAME)
+        echo $DF_INITIAL_DB_URL
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE sql-drop || echo "No database to drop"
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "chmod -R u+w *" || echo "No file permissions to fix"
+      fi
+  dependencies:
+    - drupal_dev_build
+  rules:
+    - if: '$SKIP_JOBS =~ /initial_deploy_feature/'
+      when: never
+    - !reference [.deploy_drupal_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]
+  environment:
+    url: https://$CI_COMMIT_REF_SLUG.$DF_TLD
+    on_stop: deploy_feature_stop
+  allow_failure: true
+
+## Initial deploy dev environment.
+initial_deploy_dev:
+  extends:
+    - .dev_detect_template
+    - .initial_drupal
+  dependencies:
+    - drupal_dev_build
+  rules:
+    - if: '$SKIP_JOBS =~ /initial_deploy_dev/'
+      when: never
+    - if: '$DF_INITIAL_SETUP != "true"'
+      when: never
+    - !reference [.deploy_drupal_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+########################################
+## Standard deploy phase stages.
+########################################
+
+## Feature deployment.
+deploy_feature_start:
+  extends:
+    - .feature_detect_template
+    - .deploy_drupal_template
+  environment:
+    url: https://$CI_COMMIT_REF_SLUG.$DF_TLD
+    on_stop: deploy_feature_stop
+    auto_stop_in: 30 days
+  after_script:
+    - eval $(ssh-agent -s)
+    - test ! -z "$RUNNER_DEPLOY_KEY" && ssh-add <(echo "$RUNNER_DEPLOY_KEY" | base64 --decode)
+    - test ! -z "$RUNNER_DEPLOY_KEY_DEV" && ssh-add <(echo "$RUNNER_DEPLOY_KEY_DEV" | base64 --decode)
+    - ssh-add -l
+    - export PATH="$(pwd)/bin:$(pwd)/vendor/bin:$PATH"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" rsync .gitattributes @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE:%webroot
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" rsync .gitignore @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE:%webroot
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" rsync .git @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE:%webroot
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "git remote set-url origin git@$CI_SERVER_HOST:$CI_PROJECT_PATH.git"
+  dependencies:
+    - drupal_dev_build
+  rules:
+    - if: '$SKIP_JOBS =~ /deploy_feature_start/'
+      when: never
+    - !reference [.deploy_drupal_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]
+
+## Dev deployment.
+deploy_dev:
+  extends:
+    - .dev_detect_template
+    - .deploy_drupal_template
+  dependencies:
+    - drupal_dev_build
+  rules:
+    - if: '$SKIP_JOBS =~ /deploy_dev/'
+      when: never
+    - !reference [.deploy_drupal_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+## QA deployment.
+deploy_qa:
+  extends:
+    - .qa_detect_template
+    - .deploy_drupal_template
+    - .admin_block_template
+  dependencies:
+    - drupal_release_build
+  rules:
+    - if: '$SKIP_JOBS =~ /deploy_qa/'
+      when: never
+    - !reference [.deploy_drupal_exclude_rules, rules]
+    - !reference [.qa_detect_no_env_exclude_rules, rules]
+    - !reference [.qa_detect_include_rules, rules]
+
+## Production deployment.
+deploy_prod:
+  extends:
+    - .prod_detect_template
+    - .deploy_drupal_template
+    - .admin_block_template
+  dependencies:
+    - drupal_release_build
+  when: manual
+  allow_failure: false
+  rules:
+    - if: '$SKIP_JOBS =~ /deploy_prod/'
+      when: never
+    - if: $CI_DEPLOY_FREEZE != null
+      when: never
+    - !reference [.deploy_drupal_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]
+
+
+########################################
+## Deploy stop stage.
+########################################
+
+## Clean up feature environments.
+deploy_feature_stop:
+  extends:
+    - .feature_detect_template
+  stage: pre_deploy
+  variables:
+    GIT_CHECKOUT: "false"
+    GIT_STRATEGY: none
+  script:
+    - git clone $CI_REPOSITORY_URL
+    - cd $CI_PROJECT_NAME
+    - composer install --optimize-autoloader
+    - export PATH="$(pwd)/bin:$(pwd)/vendor/bin:$PATH"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "sudo /usr/local/bin/drupal-fix-permissions.sh --drupal_user=$DRUPAL_USER --httpd_group=$WEB_GROUP"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE sql-query "drop database $DF_FEAT_ENV_DB_NAME;" || echo "No database to drop"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "chmod -R 777 $DF_FEAT_DOCROOT/$DRUSH_ALIAS_TYPE || true"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "rm -rf $DF_FEAT_DOCROOT/$DRUSH_ALIAS_TYPE"
+  when: manual
+  dependencies: []
+  environment:
+    action: stop
+  cache: {}
+  rules:
+    - if: '$SKIP_JOBS =~ /deploy_feature_stop/'
+      when: never
+    - !reference [.deploy_drupal_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]

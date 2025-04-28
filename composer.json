@@ -1,0 +1,127 @@
+{
+  "name": "coldfront/training-project",
+  "description": "The Drupal project for training.",
+  "type": "project",
+  "license": "GPL-2.0-or-later",
+  "authors": [
+    {
+      "name": "Nick Milton",
+      "email": "nickdjm@gmail.com"
+    }
+  ],
+  "minimum-stability": "dev",
+  "prefer-stable": true,
+  "repositories": {
+    "composer": {
+      "type": "composer",
+      "url": "https://packages.drupal.org/8"
+    },
+    "asset-packagist": {
+      "type": "composer",
+      "url": "https://asset-packagist.org"
+    }
+  },
+  "require": {
+    "php": "^8.2",
+    "composer/composer": "^2.1",
+    "composer/installers": "^1.11",
+    "cweagans/composer-patches": "^1.7",
+    "drupal/core": "~11.1.0",
+    "drupal/core-composer-scaffold": "*",
+    "drupal/core-project-message": "*",
+    "drupal/core-recommended": "*",
+    "drush/drush": "^13.0",
+    "oomphinc/composer-installers-extender": "^2.0",
+    "symfony/dotenv": "^7.0",
+    "wikimedia/composer-merge-plugin": "^2.1"
+  },
+  "require-dev": {
+    "dropfort/dropfort_build": "^6.0",
+    "drupal/devel": "^5.3"
+  },
+  "config": {
+    "bin-dir": "bin/",
+    "sort-packages": true,
+    "github-protocols": [
+      "https"
+    ],
+    "allow-plugins": {
+      "composer/installers": true,
+      "cweagans/composer-patches": true,
+      "dealerdirect/phpcodesniffer-composer-installer": true,
+      "drupal/core-composer-scaffold": true,
+      "drupal/core-project-message": true,
+      "oomphinc/composer-installers-extender": true,
+      "php-http/discovery": true,
+      "phpstan/extension-installer": true,
+      "tbachert/spi": true,
+      "wikimedia/composer-merge-plugin": true,
+      "zaporylie/composer-drupal-optimizations": true
+    }
+  },
+  "autoload": {
+    "files": [
+      "load.environment.php"
+    ]
+  },
+  "extra": {
+    "drupal-scaffold": {
+      "gitignore": false,
+      "allowed-packages": [
+        "dropfort/dropfort_build"
+      ],
+      "file-mapping": {
+        "[project-root]/.gitlab-ci.yml": false
+      },
+      "initial": {
+        ".editorconfig": "../.editorconfig",
+        ".gitattributes": "../.gitattributes"
+      },
+      "locations": {
+        "web-root": "web/"
+      }
+    },
+    "merge-plugin": {
+      "include": [
+        "web/modules/contrib/graupl_components/composer.libraries.json"
+      ]
+    },
+    "installer-types": [
+      "bower-asset",
+      "npm-asset"
+    ],
+    "installer-paths": {
+      "web/core": [
+        "type:drupal-core"
+      ],
+      "web/libraries/{$name}": [
+        "type:drupal-library",
+        "type:npm-asset",
+        "type:bower-asset"
+      ],
+      "web/modules/contrib/{$name}": [
+        "type:drupal-module"
+      ],
+      "web/modules/custom/{$name}": [
+        "type:drupal-custom-module"
+      ],
+      "web/themes/contrib/{$name}": [
+        "type:drupal-theme"
+      ],
+      "web/themes/custom/{$name}": [
+        "type:drupal-custom-theme"
+      ],
+      "web/profiles/contrib/{$name}": [
+        "type:drupal-profile"
+      ],
+      "web/profiles/custom/{$name}": [
+        "type:drupal-custom-profile"
+      ],
+      "drush/Commands/{$name}": [
+        "type:drupal-drush"
+      ]
+    },
+    "enable-patching": true,
+    "patches": {}
+  }
+}

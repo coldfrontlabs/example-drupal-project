@@ -1,0 +1,52 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# General deployment exclusions.
+/build-exclude-list.txt
+/build
+/testing
+/.env
+/.rsync-exclude
+/.git*
+/.husky
+/.czrc
+/.editorconfig
+/.env.example
+/README.md
+/.vscode
+/docker
+/container
+/.*.js
+/*.config.js
+/*.config.mjs
+/.*ignore
+/ci
+/.devcontainer
+*.code-workspace
+/remote_repo
+/deploystatus.log
+.*ignore
+.git*
+*.code-workspace
+*.sql
+*.sql.gz
+.npm/*
+.composer*
+
+## Deploy lock ignore.
+deploy.lock
+
+## General web tooling ignore.
+/.ddev
+/.circleci
+
+# Acquia hosting specific exclusions.
+# These files should exist in the control repo and not as part of
+# the site source repo.
+/.acquia
+/acquia-utils
+/library
+/docroot/simplesaml
+/docroot/sites/**/*.php
+/docroot/sites/**/*.yml
+/docroot/sites/sites.php

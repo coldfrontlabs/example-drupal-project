@@ -1,0 +1,117 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Build Drupal.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Build template.
+.build_drupal_template:
+  stage: build
+  variables:
+    BUILD_COMPOSER_OPTIONS: --no-dev --optimize-autoloader
+    BUILD_NPM_OPTIONS: --production --omit=dev --ignore-scripts
+    COMPOSER_EXIT_ON_PATCH_FAILURE: 1
+  script:
+    - |
+      npm install $BUILD_NPM_OPTIONS &
+      composer install $BUILD_COMPOSER_OPTIONS
+    - wait
+    - npm run build
+  interruptible: true
+  needs: []
+  artifacts:
+    name: "$CI_PROJECT_NAME-$CI_COMMIT_REF_NAME"
+    paths:
+      - ./
+    exclude:
+    - container/**
+    - container
+    - docker/**
+    - docker
+    - .devcontainer/**
+    - .devcontainer
+    - .vscode/**
+    - .vscode
+    - .gitlab/**
+    - .gitlab
+    - .git/**
+    - .git*
+    - .npm/**
+    - .npm
+    - .composer/**
+    - .composer
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-${CI_PIPELINE_ID}
+    paths:
+      - .npm
+      - .composer
+    when: on_success
+    policy: pull-push
+
+## Build exlude rules.
+.build_drupal_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE == "validation"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+
+########################################
+# Jobs.
+########################################
+
+## Dev build.
+#
+# Will run for both Feature and Development branches.
+drupal_dev_build:
+  extends:
+    - .build_drupal_template
+  variables:
+    BUILD_COMPOSER_OPTIONS: ' '
+    BUILD_NPM_OPTIONS: ' '
+  artifacts:
+    expire_in: 1 day
+  rules:
+    - if: '$SKIP_JOBS =~ /drupal_dev_build/'
+      when: never
+    - !reference [.build_drupal_exclude_rules, rules]
+    - !reference [.non_release_detect_exclude_rules, rules]
+    - !reference [.non_release_detect_include_rules, rules]
+
+## Release build.
+#
+# Will run for both QA and Production tags.
+drupal_release_build:
+  extends: .build_drupal_template
+  rules:
+    - if: '$SKIP_JOBS =~ /drupal_release_build/'
+      when: never
+    - !reference [.build_drupal_exclude_rules, rules]
+    - !reference [.release_detect_exclude_rules, rules]
+    - !reference [.release_detect_include_rules, rules]

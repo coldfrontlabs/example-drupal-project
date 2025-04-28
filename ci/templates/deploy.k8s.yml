@@ -1,0 +1,242 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Kubernetes deployment.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Deployment template.
+## Default template assumes a DigitalOcean k8s cluster.
+.k8s_deploy:
+  image:
+    name: alpine/doctl:1.28.13
+    entrypoint: [""]
+  stage: deploy
+  resource_group: deploy
+  variables:
+    HELM_CHART_VERSION: ^0.1.3
+    HELM_ARGS: --install --create-namespace --dependency-update --wait --timeout 600s --atomic --cleanup-on-fail --debug
+    IMAGETAG: ""
+    GIT_STRATEGY: none
+  environment:
+    url: https://$DF_TLD
+    action: start
+  before_script:
+    - mkdir -p ~/.kube
+    # doctl authenticating
+    - doctl auth init -t ${DIGITALOCEAN_TOKEN}
+    # run other doctl command if required
+    - apk add jq yq
+    # Setup kubeconfig.
+    - >
+      if [ -z "$K8S_CLUSTER_ID" ]; then
+        # Detect the cluster ID, fail if multiple found.
+        export K8S_CLUSTER_ID=`$(doctl kubernetes cluster list -o  json |jq -r  .[].id)`;
+      fi
+    - doctl kubernetes cluster kubeconfig save $K8S_CLUSTER_ID
+    - helm version
+    - kubectl version
+  script:
+    - >
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        SET_IMAGETAG="--set image.tag=$CI_COMMIT_TAG"
+      fi
+    # Use the artifact tag if available.
+    - >
+      if [ -n "$DF_IMAGE_TAG" ]; then
+        SET_IMAGETAG="--set image.tag=$DF_IMAGE_TAG"
+      fi
+    # Use the artifact repo if available.
+    - >
+      if [ -n "$DF_IMAGE_REPOSITORY" ]; then
+        SET_IMAGEREPO="--set image.repository=$DF_IMAGE_REPOSITORY"
+      fi
+    - >
+      if [ ! -f k8s/$DRUSH_ALIAS_TYPE/$DRUSH_ALIAS_GROUP.yml ]; then
+        echo "No k8s/$DRUSH_ALIAS_TYPE/$DRUSH_ALIAS_GROUP.yml file found. Not deploying to k8s."
+        exit 1
+      fi
+    # Configure Helm repos.
+    - helm repo add --username gitlab-ci-token --password $CI_JOB_TOKEN coldfront https://git.dropfort.com/api/v4/projects/1231/packages/helm/stable
+    # Download deployment secrets.
+    - 'curl -f -H "api-key: $DF_DEPLOY_TOKEN" -H "Accept: application/json" -o secrets.json https://api.dropfort.com/api/k8s/v1/site/deployment/$DF_NAMESPACE-$DRUSH_ALIAS_TYPE-$DRUSH_ALIAS_GROUP/secrets'
+    # Download ingress data.
+    - 'curl -f -H "api-key: $DF_DEPLOY_TOKEN" -H "Accept: application/json" -o ingress.json https://api.dropfort.com/api/k8s/v1/site/deployment/$DF_NAMESPACE-$DRUSH_ALIAS_TYPE-$DRUSH_ALIAS_GROUP/ingress'
+    # Download deployment caching proxy config.
+    - 'curl -f -H "api-key: $DF_DEPLOY_TOKEN" -H "Accept: application/yaml" -o varnish.yml https://api.dropfort.com/api/k8s/v1/site/deployment/$DF_NAMESPACE-$DRUSH_ALIAS_TYPE-$DRUSH_ALIAS_GROUP/varnish'
+    # Download deployment proxysql config.
+    - 'curl -f -H "api-key: $DF_DEPLOY_TOKEN" -H "Accept: application/yaml" -o proxysql.yml https://api.dropfort.com/api/k8s/v1/site/deployment/$DF_NAMESPACE-$DRUSH_ALIAS_TYPE-$DRUSH_ALIAS_GROUP/proxysql'
+    - export DF_PROXYSQL_NAME=`cat proxysql.yml | yq .df_env_proxysql`
+    - >
+      if [ -z "$DF_PROXYSQL_NAME" ]; then
+        echo "No proxysql service defined, exiting."
+        exit 1
+      fi
+    # Download the Drupal Helm chart values.
+    - 'curl -f -H "api-key: $DF_DEPLOY_TOKEN" -H "Accept: application/yaml" -o values.yaml https://api.dropfort.com/api/k8s/v1/site/deployment/$DF_NAMESPACE-$DRUSH_ALIAS_TYPE-$DRUSH_ALIAS_GROUP/values'
+    # Apply the changes.
+    - kubectl apply -f secrets.json
+    - kubectl apply -f ingress.json
+    - helm upgrade $DF_NAMESPACE-$DRUSH_ALIAS_TYPE-$DRUSH_ALIAS_GROUP-httpcache coldfront/kube-httpcache -f varnish.yml -i --reset-then-reuse-values
+    - helm upgrade $DF_PROXYSQL_NAME coldfront/proxysql -f proxysql.yml -i --reset-then-reuse-values
+    # Set the release as the same version of the image.
+    - helm upgrade $DF_NAMESPACE-$DRUSH_ALIAS_TYPE-$DRUSH_ALIAS_GROUP coldfront/drupal --version $HELM_CHART_VERSION $HELM_ARGS -f values.yaml -f k8s/$DRUSH_ALIAS_TYPE/$DRUSH_ALIAS_GROUP.yml --set "versionLabel=$CI_COMMIT_SHA" $SET_IMAGETAG  $SET_IMAGEREPO -i --reset-then-reuse-values
+
+########################################
+## Initial deploy phase stages.
+########################################
+# @todo: Add a deploy_drupal_start stage that runs before the install stage.
+
+########################################
+## Standard deploy phase stages.
+########################################
+
+## Feature deployment.
+deploy_k8s_feat:
+  extends:
+    - .feature_detect_template
+    - .k8s_deploy
+  dependencies:
+    - drupal_dev_build
+    - publish_container_feat
+  rules:
+    - if: '$SKIP_JOBS =~ /deploy_k8s_feat/'
+      when: never
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.deploy_drupal_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]
+  script:
+    - >
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        SET_IMAGETAG="--set image.tag=$CI_COMMIT_TAG"
+      fi
+    # Use the artifact tag if available.
+    - >
+      if [ -n "$DF_IMAGE_TAG" ]; then
+        SET_IMAGETAG="--set image.tag=$DF_IMAGE_TAG"
+      fi
+    # Use the artifact repo if available.
+    - >
+      if [ -n "$DF_IMAGE_REPOSITORY" ]; then
+        SET_IMAGEREPO="--set image.repository=$DF_IMAGE_REPOSITORY"
+      fi
+    - >
+      if [ ! -f k8s/feat/$DRUSH_ALIAS_GROUP.yml ]; then
+        echo "No k8s/feat/$DRUSH_ALIAS_GROUP.yml file found. Not deploying to k8s."
+        exit 1
+      fi
+    # Configure Helm repos.
+    - helm repo add --username gitlab-ci-token --password $CI_JOB_TOKEN coldfront https://git.dropfort.com/api/v4/projects/1231/packages/helm/stable
+    # Download ingress data for the source deployment.
+    - export SOURCEDEPLOYMENT=`cat k8s/feat/$DRUSH_ALIAS_GROUP.yml | yq -C ".sourceName"`
+    - 'curl -f -H "api-key: $DF_DEPLOY_TOKEN" -H "Accept: application/json" -o ingress.json https://api.dropfort.com/api/k8s/v1/site/deployment/$SOURCEDEPLOYMENT/ingress'
+    # Extract the annotations from the ingress to apply any firewall rules.
+    # @see https://unix.stackexchange.com/questions/569876/add-json-objects-to-array-using-jq
+    - cat ingress.json | jq .metadata.annotations -r | jq -n ".ingressAnnotations |= [inputs]" > ingressAnnotations.json
+    # Deploy the environment. Allow the k8s/feat/$DF_NAMESPACE-feat-$DRUSH_ALIAS_GROUP.yml to override values.
+    - helm upgrade $DF_NAMESPACE-$DRUSH_ALIAS_TYPE-$DRUSH_ALIAS_GROUP coldfront/drupal-feature-env $HELM_ARGS -f k8s/feat/$DRUSH_ALIAS_GROUP.yml -f ingressAnnotations.json --set "ingressHostname=$CI_COMMIT_REF_SLUG.$DF_TLD" --set "versionLabel=$CI_COMMIT_SHA" $SET_IMAGETAG  $SET_IMAGEREPO -i --reset-then-reuse-values
+    - echo "Depending on the size of your database it may take a few minutes for the site to be available."
+    - echo "The site is being deployed to https://$CI_COMMIT_REF_SLUG.$DF_TLD"
+    - echo "If your database has been synced or installed for the first time the admin user account has been unblocked and their credentials reset to 'admin/admin'"
+    - echo "Please reset the admin user password immediately after logging in."
+  environment:
+    url: https://$CI_COMMIT_REF_SLUG.$DF_TLD
+    on_stop: deploy_k8s_feat_stop
+  allow_failure: false
+
+## Dev deployment.
+deploy_k8s_dev:
+  extends:
+    - .dev_detect_template
+    - .k8s_deploy
+  dependencies:
+    - drupal_dev_build
+    - publish_container_dev
+  rules:
+    - if: '$SKIP_JOBS =~ /deploy_dev/'
+      when: never
+    - !reference [.deploy_drupal_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+## QA deployment.
+deploy_k8s_qa:
+  extends:
+    - .qa_detect_template
+    - .k8s_deploy
+  dependencies:
+    - drupal_release_build
+    - publish_container_qa
+  rules:
+    - if: '$SKIP_JOBS =~ /deploy_qa/'
+      when: never
+    - !reference [.deploy_drupal_exclude_rules, rules]
+    - !reference [.qa_detect_no_env_exclude_rules, rules]
+    - !reference [.qa_detect_include_rules, rules]
+
+## Production deployment.
+deploy_k8s_prod:
+  extends:
+    - .prod_detect_template
+    - .k8s_deploy
+  dependencies:
+    - drupal_release_build
+    - publish_container_prod
+  when: manual
+  allow_failure: false
+  rules:
+    - if: '$SKIP_JOBS =~ /deploy_prod/'
+      when: never
+    - if: $CI_DEPLOY_FREEZE != null
+      when: never
+    - !reference [.deploy_drupal_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]
+
+
+########################################
+## Deploy stop stage.
+########################################
+
+## Clean up feature environments.
+deploy_k8s_feat_stop:
+  extends:
+    - .feature_detect_template
+    - .k8s_deploy
+  stage: pre_deploy
+  script:
+      - helm uninstall $DF_NAMESPACE-$DRUSH_ALIAS_TYPE-$DRUSH_ALIAS_GROUP
+  when: manual
+  environment:
+    action: stop
+  cache: {}
+  rules:
+    - if: '$SKIP_JOBS =~ /deploy_k8s_feat_stop/'
+      when: never
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.deploy_drupal_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]

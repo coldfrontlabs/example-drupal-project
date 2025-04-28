@@ -1,0 +1,35 @@
+{
+    // This file is managed by dropfort/dropfort_build.
+    // Modifications to this file will be overwritten by default.
+
+    // See http://go.microsoft.com/fwlink/?LinkId=827846 to learn about workspace recommendations.
+    // Extension identifier format: ${publisher}.${name}. Example: vscode.csharp
+
+    // List of extensions which should be recommended for users of this workspace.
+    "recommendations": [
+        /* General VSCode QoL */
+        "johnpapa.vscode-peacock",
+        "mutantdino.resourcemonitor",
+        "usernamehw.errorlens",
+        "mikestead.dotenv",
+        "DavidAnson.vscode-markdownlint",
+
+        /* Git, Build, Debug */
+        "ms-azuretools.vscode-docker",
+        "ms-vscode-remote.remote-ssh",
+        "gitlab.gitlab-workflow",
+        "eamodio.gitlens",
+        "vivaxy.vscode-conventional-commits",
+
+        /* Requirements for dev containers */
+        "ms-vscode-remote.vscode-remote-extensionpack"
+    ],
+    // List of extensions recommended by VS Code that should not be recommended for users of this workspace.
+    "unwantedRecommendations": [
+        "robinbentley.sass-indented",
+        "felixfbecker.php-intellisense",
+        "daosro.stylelint",
+        "ikappas.phpcs",
+        "shevaua.phpcs"
+    ]
+}

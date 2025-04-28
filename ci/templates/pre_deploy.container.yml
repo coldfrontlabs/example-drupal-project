@@ -1,0 +1,155 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+################################################
+# Create a container image for the application.
+################################################
+.publish_container_template:
+  variables:
+    # When using dind service we need to instruct docker, to talk with the
+    # daemon started inside of the service. The daemon is available with
+    # a network connection instead of the default /var/run/docker.sock socket.
+    #
+    # The 'docker' hostname is the alias of the service container as described at
+    # https://docs.gitlab.com/ee/ci/docker/using_docker_images.html#accessing-the-services
+    #
+    # When using dind, it's wise to use the overlayfs driver for
+    # improved performance.
+    DOCKER_DRIVER: overlay2
+    CI_REGISTRY: git.dropfort.com:4567
+    COMPOSE_PROJECT_NAME: $CI_PROJECT_NAME
+    CONTAINER_TEST_IMAGE: $CI_PROJECT_NAME/drupal
+    CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+    CONTAINER_DIR: /var/www/html/$DF_NAMESPACE-$DRUSH_ALIAS_TYPE-$DRUSH_ALIAS_GROUP
+    DOCKER_TLS_CERTDIR: ""
+  image: docker:$DOCKER_VERSION
+  stage: pre_deploy
+  services:
+    - docker:$DOCKER_VERSION-dind
+  before_script:
+    - docker info
+    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
+  script:
+    - echo $CI_REGISTRY_IMAGE
+    - echo $CONTAINER_RELEASE_IMAGE
+    - docker compose -f container/release/docker-compose.yml build
+    - docker image ls
+    # Perform some basic tests on the image.
+    - docker run $CONTAINER_TEST_IMAGE php -v
+    - docker run $CONTAINER_TEST_IMAGE composer --version
+    - docker run $CONTAINER_TEST_IMAGE drush status
+    # Create a tag of the image and push it to the registry.
+    - docker tag $CONTAINER_TEST_IMAGE $CONTAINER_RELEASE_IMAGE
+    - docker push $CONTAINER_RELEASE_IMAGE
+    - echo "DF_IMAGE_TAG=$CI_COMMIT_REF_SLUG" > container_release.env
+    - echo "DF_IMAGE_REPOSITORY=$CI_REGISTRY_IMAGE" >> container_release.env;
+    # If the CI_COMMIT_TAG is set, create a tag for the image using the commit tag.
+    - >
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        echo "Tagging image with $CI_COMMIT_TAG";
+        docker tag $CONTAINER_TEST_IMAGE $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG;
+        docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG;
+        echo "DF_IMAGE_TAG=$CI_COMMIT_TAG" > container_release.env;
+        echo "DF_IMAGE_REPOSITORY=$CI_REGISTRY_IMAGE" >> container_release.env;
+      else
+        # Generate a tag for the image using the commit hash.
+        echo "Tagging image with $CI_COMMIT_SHA";
+        docker tag $CONTAINER_TEST_IMAGE $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA;
+        docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA;
+        echo "DF_IMAGE_TAG=$CI_COMMIT_SHA" > container_release.env;
+        echo "DF_IMAGE_REPOSITORY=$CI_REGISTRY_IMAGE" >> container_release.env;
+      fi
+  # @see https://docs.gitlab.com/ee/ci/variables/index.html#pass-an-environment-variable-to-another-job
+  artifacts:
+    reports:
+      dotenv: container_release.env
+  interruptible: false
+  tags:
+    - docker
+    - privileged
+
+publish_container_feat:
+  extends:
+    - .feature_detect_template
+    - .publish_container_template
+  dependencies:
+    - drupal_dev_build
+  variables:
+    CONTAINER_DIR: /var/www/html
+  rules:
+    - if: '$SKIP_JOBS =~ /publish_container/'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]
+
+
+publish_container_dev:
+  extends:
+    - .dev_detect_template
+    - .publish_container_template
+  dependencies:
+    - drupal_dev_build
+  rules:
+    - if: '$SKIP_JOBS =~ /publish_container/'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+
+publish_container_qa:
+  extends:
+    - .qa_detect_template
+    - .publish_container_template
+  dependencies:
+    - drupal_release_build
+  rules:
+    - if: '$SKIP_JOBS =~ /publish_container/'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+    - !reference [.qa_detect_include_rules, rules]
+
+
+publish_container_prod:
+  extends:
+    - .prod_detect_template
+    - .publish_container_template
+  dependencies:
+    - drupal_release_build
+  rules:
+    - if: '$SKIP_JOBS =~ /publish_container/'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+    - !reference [.prod_detect_include_rules, rules]

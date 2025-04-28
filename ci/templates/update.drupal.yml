@@ -1,0 +1,157 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Update Drupal database.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Update Drupal template.
+.update_drupal_template:
+  stage: update_data
+  retry: 1
+  variables:
+    DRUPAL_BUILD_SITES_DIR: $CI_PROJECT_NAME/sites
+    DRUPAL_SITE_ROOT: ""
+    GIT_STRATEGY: none
+  environment:
+    url: https://$DF_TLD
+    action: verify
+  script:
+    - DF_TLD=${CI_COMMIT_REF_SLUG#'http://'}
+    - DF_TLD=${DF_TLD#'https://'}
+    - DRUPAL_SITE_ROOT='$DF_FEAT_DOCROOT/$DRUSH_ALIAS_URI/web'
+    - test -n "$DRUPAL_SITE_ROOT"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE status
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE config:status
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE state:set system.maintenance_mode 1 --input-format=integer
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "echo 'MAINTENANCE_MODE=update' >> ../.env.maintenance"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "drush sset environment_indicator.current_release $CI_COMMIT_REF_NAME" || true
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE deploy
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE state:set system.maintenance_mode 0 --input-format=integer
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "rm -f ../.env.maintenance"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "drush cset raven.settings release $CI_COMMIT_REF_NAME" || true
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE state:delete dropfort_update.last_status || true
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE config:status
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE cr
+  after_script:
+    - eval $(ssh-agent -s)
+    - test ! -z "$RUNNER_DEPLOY_KEY" && ssh-add <(echo "$RUNNER_DEPLOY_KEY" | base64 --decode)
+    - test ! -z "$RUNNER_DEPLOY_KEY_DEV" && ssh-add <(echo "$RUNNER_DEPLOY_KEY_DEV" | base64 --decode)
+    - ssh-add -l
+    - export PATH="$(pwd)/bin:$(pwd)/vendor/bin:$PATH"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "rm -f deploy.lock"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE state:set system.maintenance_mode 0 --input-format=integer
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE cr
+    - exit
+
+## Update Drupal exclude rules.
+.update_drupal_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy"'
+      when: never
+    - if: '$TARGET_PLATFORM == "pantheon"'
+      when: never
+    - if: '$TARGET_PLATFORM == "acquia"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+
+########################################
+# Jobs.
+########################################
+
+## Feature update.
+update_feature:
+  extends:
+    - .update_drupal_template
+    - .feature_detect_template
+  environment:
+    url: https://$CI_COMMIT_REF_SLUG.$DF_TLD
+    on_stop: deploy_feature_stop
+  after_script:
+    - eval $(ssh-agent -s)
+    - test ! -z "$RUNNER_DEPLOY_KEY" && ssh-add <(echo "$RUNNER_DEPLOY_KEY" | base64 --decode)
+    - test ! -z "$RUNNER_DEPLOY_KEY_DEV" && ssh-add <(echo "$RUNNER_DEPLOY_KEY_DEV" | base64 --decode)
+    - ssh-add -l
+    - export PATH="$(pwd)/bin:$(pwd)/vendor/bin:$PATH"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "rm -f deploy.lock"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE uli --no-browser --uri="https://$CI_COMMIT_REF_SLUG.$DF_TLD"
+    - exit
+  dependencies:
+    - drupal_dev_build
+  rules:
+    - if: '$SKIP_JOBS =~ /update_feature/'
+      when: never
+    - !reference [.update_drupal_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]
+
+## Dev update.
+update_dev:
+  extends:
+    - .update_drupal_template
+    - .dev_detect_template
+  dependencies:
+    - drupal_dev_build
+  rules:
+    - if: '$SKIP_JOBS =~ /update_dev/'
+      when: never
+    - !reference [.update_drupal_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+## QA update.
+update_qa:
+  extends:
+    - .update_drupal_template
+    - .qa_detect_template
+  dependencies:
+    - drupal_release_build
+  rules:
+    - if: '$SKIP_JOBS =~ /update_qa/'
+      when: never
+    - !reference [.update_drupal_exclude_rules, rules]
+    - !reference [.qa_detect_no_env_exclude_rules, rules]
+    - !reference [.qa_detect_include_rules, rules]
+
+## Prod update.
+update_prod:
+  extends:
+    - .update_drupal_template
+    - .prod_detect_template
+  dependencies:
+    - drupal_release_build
+  allow_failure: false
+  rules:
+    - if: '$SKIP_JOBS =~ /update_prod/'
+      when: never
+    - if: $CI_DEPLOY_FREEZE != null
+      when: never
+    - !reference [.update_drupal_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]

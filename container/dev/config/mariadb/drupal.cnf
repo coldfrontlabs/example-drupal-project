@@ -1,0 +1,3 @@
+[mariadb]
+# @see https://www.drupal.org/docs/system-requirements/setting-the-mysql-transaction-isolation-level
+transaction-isolation=READ-COMMITTED

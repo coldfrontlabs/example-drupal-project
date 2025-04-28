@@ -1,0 +1,10 @@
+# This file is managed by dropfort/dropfort_build.
+# Delete this file and run `composer update dropfort/dropfort_build` to regenerate it.
+parameters:
+  http.response.debug_cacheability_headers: false
+  twig.config:
+    debug: true
+    cache: false
+services:
+  cache.backend.null:
+    class: Drupal\Core\Cache\NullBackendFactory

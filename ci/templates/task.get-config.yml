@@ -1,0 +1,101 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Backcopy Drupal database.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Get config template.
+.get_config_template:
+  stage: task
+  variables:
+    DRUSH_CONFIG_SOURCE: prod
+  when: manual
+  allow_failure: true
+  script:
+    - composer install --optimize-autoloader
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_CONFIG_SOURCE cex -y
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_CONFIG_SOURCE ssh "tar -czvf config.tar.gz ../config"
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" rsync @$DRUSH_ALIAS_GROUP.$DRUSH_CONFIG_SOURCE:config.tar.gz ./ -- --ignore-times --no-owner --no-group --no-perms --no-t -O --delete
+  artifacts:
+    name: "$CI_PROJECT_NAME-$DRUSH_CONFIG_SOURCE-config"
+    paths:
+      - config.tar.gz
+    expire_in: 1 day
+
+## Get config exclude rules.
+.get_config_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PLATFORM == "pantheon"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+
+## Get config include rules.
+.get_config_include_rules:
+  rules:
+    - if: '$TARGET_PIPELINE == "all"'
+    - if: '$TARGET_PIPELINE == "build_and_deploy"'
+
+########################################
+# Jobs.
+########################################
+
+## Get config from Dev.
+get_config_dev:
+  extends: .get_config_template
+  variables:
+    DRUSH_CONFIG_SOURCE: dev
+  rules:
+    - if: '$SKIP_JOBS =~ /get_config_dev/'
+      when: never
+    - !reference [.get_config_exclude_rules, rules]
+    - !reference [.get_config_include_rules, rules]
+
+## Get config from QA.
+get_config_qa:
+  extends: .get_config_template
+  variables:
+    DRUSH_CONFIG_SOURCE: qa
+  rules:
+    - if: '$SKIP_JOBS =~ /get_config_qa/'
+      when: never
+    - !reference [.get_config_exclude_rules, rules]
+    - !reference [.get_config_include_rules, rules]
+    - !reference [.qa_detect_no_env_exclude_rules, rules]
+
+## Get config from Prod.
+get_config_prod:
+  extends: .get_config_template
+  variables:
+    DRUSH_CONFIG_SOURCE: prod
+  rules:
+    - if: '$SKIP_JOBS =~ /get_config_prod/'
+      when: never
+    - !reference [.get_config_exclude_rules, rules]
+    - !reference [.get_config_include_rules, rules]

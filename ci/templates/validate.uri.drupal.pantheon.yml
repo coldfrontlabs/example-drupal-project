@@ -1,0 +1,115 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Drupal URI test for Pantheon.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Pantheon Drush URI template.
+.drush_uri_template_pantheon:
+  stage: validate
+  environment:
+    action: access
+  script:
+    ## Install terminus to communicate with the Pantheon servers.
+    - mkdir ~/terminus
+    - cd ~/terminus
+    - curl -O https://raw.githubusercontent.com/pantheon-systems/terminus-installer/master/builds/installer.phar && php installer.phar install
+    ## Use the machine token to connect (GitLab CI variables).
+    - vendor/bin/terminus auth:login --machine-token=$MACHINE_TOKEN
+    # Test that drush has a URI associated to the Drupal site.
+    # We don't run the status through the alias directly specifically so we can test the drush settings on the remote.
+    - DRUSH_ALIAS_URI=$(vendor/bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- status --field=uri --local)
+    - DRUSH_ALIAS_URI=${DRUSH_ALIAS_URI#'http://default'}
+    - DRUSH_ALIAS_URI=${DRUSH_ALIAS_URI#'https://default'}
+    - DRUSH_ALIAS_URI=${DRUSH_ALIAS_URI#'default'}
+    - echo $DRUSH_ALIAS_URI
+    - test ! -z "${DRUSH_ALIAS_URI// }"
+
+## Pantheon Drush URI exclude rules.
+.drush_uri_pantheon_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy" && $TARGET_PIPELINE != "validation"'
+      when: never
+    - if: '$TARGET_PLATFORM != "pantheon"'
+      when: never
+    - if: '$SKIP_VALIDATE == "true"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[skip validate\]/'
+      when: never
+
+
+########################################
+# Jobs.
+########################################
+
+## Dev URI validation.
+validate_dev_uri_pantheon:
+  extends:
+    - .drush_uri_template_pantheon
+    - .dev_detect_template
+  dependencies:
+    - drupal_dev_build
+  variables:
+    DRUSH_ALIAS_TYPE: dev
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_dev_uri_pantheon/'
+      when: never
+    - !reference [.drush_uri_pantheon_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+## QA URI validation.
+validate_qa_uri_pantheon:
+  extends:
+    - .drush_uri_template_pantheon
+    - .qa_detect_template
+  dependencies:
+    - drupal_release_build
+  variables:
+    DRUSH_ALIAS_TYPE: test
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_qa_uri_pantheon/'
+      when: never
+    - !reference [.drush_uri_pantheon_exclude_rules, rules]
+    - !reference [.qa_detect_include_rules, rules]
+
+## Prod URI validation.
+validate_prod_uri_pantheon:
+  extends:
+    - .drush_uri_template_pantheon
+    - .prod_detect_template
+  dependencies:
+    - drupal_release_build
+  variables:
+    DRUSH_ALIAS_TYPE: live
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_prod_uri_pantheon/'
+      when: never
+    - !reference [.drush_uri_pantheon_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]

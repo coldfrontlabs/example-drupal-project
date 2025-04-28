@@ -1,0 +1,115 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Broken Links Check
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Standard broken link check template.
+.link_check_template:
+  variables:
+    DF_LINK_CHECK_OPTIONS: --recursion-level=3 --timeout=60
+  stage: validate
+  timeout: 2 hours
+  environment:
+    action: access
+  script:
+    - WEB_URI=$(drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE status --field=uri)
+    - echo $WEB_URI
+    - linkchecker --file-output=csv/linkreport.csv --file-output=html/linkreport.html $DF_LINK_CHECK_OPTIONS $WEB_URI
+  allow_failure: true
+  artifacts:
+    name: "$CI_PROJECT_NAME-$CI_COMMIT_REF_NAME-linkreport"
+    paths:
+      - linkreport.csv
+      - linkreport.html
+    when: always
+  when: manual
+
+## Link check exclude rules.
+.link_check_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy" && $TARGET_PIPELINE != "validation"'
+      when: never
+    - if: '$SKIP_VALIDATE == "true"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[skip validate\]/'
+      when: never
+
+
+########################################
+# Jobs.
+########################################
+
+## Feature link validation.
+validate_feature_links:
+  extends:
+    - .link_check_template
+    - .feature_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_feature_links/'
+      when: never
+    - !reference [.link_check_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]
+
+## Dev link validation.
+validate_dev_links:
+  extends:
+    - .link_check_template
+    - .dev_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_dev_links/'
+      when: never
+    - !reference [.link_check_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+## QA link validation.
+validate_qa_links:
+  extends:
+    - .link_check_template
+    - .qa_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_qa_links/'
+      when: never
+    - !reference [.link_check_exclude_rules, rules]
+    - !reference [.qa_detect_no_env_exclude_rules, rules]
+    - !reference [.qa_detect_include_rules, rules]
+
+## Prod link validation.
+validate_prod_links:
+  extends:
+    - .link_check_template
+    - .prod_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_prod_links/'
+      when: never
+    - !reference [.link_check_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]

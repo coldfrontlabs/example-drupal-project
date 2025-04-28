@@ -1,0 +1,109 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Clean up Drupal backups.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Cleanup on success template.
+.cleanup_success_template:
+  stage: cleanup
+  variables:
+    GIT_STRATEGY: none
+  script:
+    # Keeps a 3 archives. #todo: Make the number of backups kept configurable. 1 + the number of archives to keep.
+    - drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh "ls -dt $DRUSH_ARB_BACKUP_DIR/* | tail -n +4 | xargs -r -I_percent -- sh -c 'chmod -R --quiet 777 _percent;rm -rf _percent;'"
+  when: always
+
+## Cleanup exclude rules.
+.cleanup_success_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy"'
+      when: never
+    - if: '$TARGET_PLATFORM == "pantheon"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+
+########################################
+# Jobs.
+########################################
+
+## Feature cleanup.
+cleanup_job_feature:
+  extends:
+    - .cleanup_success_template
+    - .feature_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /cleanup_job_feature/'
+      when: never
+    - !reference [.cleanup_success_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]
+
+## Dev cleanup.
+cleanup_job_dev:
+  extends:
+    - .cleanup_success_template
+    - .dev_detect_template
+  tags:
+    - development
+  rules:
+    - if: '$SKIP_JOBS =~ /cleanup_job_dev/'
+      when: never
+    - !reference [.cleanup_success_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+## QA cleanup.
+cleanup_job_qa:
+  extends:
+    - .cleanup_success_template
+    - .qa_detect_template
+  tags:
+    - testing
+  rules:
+    - if: '$SKIP_JOBS =~ /cleanup_job_qa/'
+      when: never
+    - !reference [.cleanup_success_exclude_rules, rules]
+    - !reference [.qa_detect_no_env_exclude_rules, rules]
+    - !reference [.qa_detect_include_rules, rules]
+
+## Prod cleanup.
+cleanup_job_prod:
+  extends:
+    - .cleanup_success_template
+    - .prod_detect_template
+  tags:
+    - production
+  rules:
+    - if: '$SKIP_JOBS =~ /cleanup_job_prod/'
+      when: never
+    - !reference [.cleanup_success_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]

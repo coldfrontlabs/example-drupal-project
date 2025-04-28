@@ -1,0 +1,13 @@
+training:
+  options:
+    command-specific:
+      rsync:
+        omit-dir-times: true
+        exclude-paths: 'web/sites'
+    os: Linux
+    source-command-specific:
+    target-command-specific:
+      sql-sync:
+        sanitize: true
+        enable: {  }
+        disable: {  }

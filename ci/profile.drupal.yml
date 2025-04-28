@@ -1,0 +1,136 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+include:
+  # Include environments first.
+  - local: '/ci/templates/environments.drupal.yml'
+  # Include everything else alphabetically to assist in finding templates.
+  - local: '/ci/templates/build.drupal.yml'
+  - local: '/ci/templates/cleanup.drupal.yml'
+  - local: '/ci/templates/code-test.drupal.yml'
+  - local: '/ci/templates/code-test.scripts.yml'
+  - local: '/ci/templates/deploy.drupal.acquia.yml'
+  - local: '/ci/templates/deploy.drupal.pantheon.yml'
+  - local: '/ci/templates/deploy.drupal.yml'
+  - local: '/ci/templates/post_security.apply-updates.yml'
+  - local: '/ci/templates/post_security.apply-updates.pantheon.yml'
+  - local: '/ci/templates/post_update.migrate.yml'
+  - local: '/ci/templates/pre_deploy.container.yml'
+  - local: '/ci/templates/pre_deploy.package.yml'
+  - local: '/ci/templates/pre_deploy.release.yml'
+  - local: '/ci/templates/pre_validate.search.yml'
+  - local: '/ci/templates/security.composer.yml'
+  - local: '/ci/templates/security.npm.yml'
+  - local: '/ci/templates/task.k8s-restart-varnish.yml'
+  - local: '/ci/templates/task.k8s-update-secrets.yml'
+  - local: '/ci/templates/task.k8s-update-varnish.yml'
+  - local: '/ci/templates/task.backcopy-data.drupal.yml'
+  - local: '/ci/templates/task.backcopy-files.drupal.yml'
+  - local: '/ci/templates/task.get-config.yml'
+  - local: '/ci/templates/task.get-db.yml'
+  - local: '/ci/templates/update.drupal.yml'
+  - local: '/ci/templates/validate.acceptance.drupal.yml'
+  - local: '/ci/templates/validate.acceptance.js.yml'
+  - local: '/ci/templates/validate.accessibility.yml'
+  - local: '/ci/templates/validate.core-requirements.drupal.yml'
+  - local: '/ci/templates/validate.css.yml'
+  - local: '/ci/templates/validate.drupal-deprecations.yml'
+  - local: '/ci/templates/validate.links.yml'
+  - local: '/ci/templates/validate.outdated.composer.yml'
+  - local: '/ci/templates/validate.outdated.npm.yml'
+  - local: '/ci/templates/validate.phpcompatibility.drupal.yml'
+  - local: '/ci/templates/validate.uri.drupal.pantheon.yml'
+  - local: '/ci/templates/validate.uri.drupal.yml'
+
+stages:
+  - task
+  - build
+  - test
+  - pre_deploy
+  - deploy
+  - update_data
+  - post_update
+  - pre_validate
+  - validate
+  - security
+  - post_security
+  - cleanup
+
+variables:
+  WEB_GROUP: apache
+  DRUPAL_USER: cibuild
+  GET_SOURCES_ATTEMPTS: 3
+  DF_DRUPAL_WEBROOT: web
+  DF_CONTAINER_ROOT: container
+  PHPCS_EXTENSIONS: php,module,inc,install,test,profile,theme
+  PHPCS_IGNORE: "**/testing/*,**/test/*,**/node_modules/*,**/vendor/*,**/bin/*,**/docker/*,*.md,$DF_DRUPAL_WEBROOT/autoload.php,$DF_DRUPAL_WEBROOT/*/contrib/*,$DF_DRUPAL_WEBROOT/core/*,$DF_DRUPAL_WEBROOT/libraries/*,$DF_DRUPAL_WEBROOT/sites/*/files/*"
+  DRUSH_DIR_PATH: drush
+  DRUSH_ALIAS_DIR_PATH: drush/sites/
+  DRUSH_SITE_ALIAS_OPTIONS: --alias-path=$DRUSH_DIR_PATH/sites --include=$DRUSH_DIR_PATH --local --yes
+  DRUSH_SSH_OPTIONS: -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -l $DRUPAL_USER -q
+  DRUSH_RSYNC_OPTIONS: --no-perms --no-group --no-owner --no-t
+  DRUSH_ARB_BACKUP_DIR: /var/tmp/cibuilds/$CI_PROJECT_NAME/$DF_ENV_TYPE
+  DF_FEAT_DOCROOT: /var/www/html/dev
+  THEME_DIR_PATH: $DF_DRUPAL_WEBROOT/themes/custom/$THEMENAME
+  DF_REMOTE_ORIGIN: git@git.dropfort.com:$CI_PROJECT_PATH.git
+  TARGET_PIPELINE: all
+  PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
+  TERMINUS_VERSION: 3.4.0
+  COMPOSER_VERSION: '--2'
+  COMPOSER_HOME: $CI_PROJECT_DIR/.composer
+
+default:
+  before_script:
+    - eval $(ssh-agent -s)
+    - test ! -z "$RUNNER_DEPLOY_KEY" && ssh-add <(echo "$RUNNER_DEPLOY_KEY" | base64 --decode)
+    - test ! -z "$RUNNER_DEPLOY_KEY_DEV" && ssh-add <(echo "$RUNNER_DEPLOY_KEY_DEV" | base64 --decode)
+    - ssh-add -l
+    - mkdir -p bin
+    - export PATH="$(pwd)/bin:$(pwd)/vendor/bin:$PATH"
+    - export COMPOSER_PATH=$(which composer)
+    - >
+      if [ -z $COMPOSER_PATH ] || [ $COMPOSER_PATH == '/usr/local/bin/composer' ]; then
+        php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" \
+        && php -r "if (hash_file('SHA384', 'composer-setup.php') === '$COMPOSER_SHA') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;" \
+        && php composer-setup.php --install-dir=bin --filename=composer \
+        && php -r "unlink('composer-setup.php');" \
+        && echo "Composer installed" \
+        && composer self-update $COMPOSER_VERSION
+      fi
+    - composer --version
+    # Generate the feature env db name.
+    - export DF_FEAT_ENV_DB_NAME="feat"$(echo $CI_COMMIT_REF_SLUG | md5sum | cut -d' ' -f1)
+    # Add known hosts entries.
+    - mkdir -p ~/.ssh || true
+    - touch ~/.ssh/known_hosts
+    - chmod 700 ~/.ssh
+    - chmod 600 ~/.ssh/*
+    - echo "$SSH_KNOWN_HOSTS" | base64 --decode >> ~/.ssh/known_hosts
+    - npm config set cache $CI_PROJECT_DIR/.npm --global
+
+  # Composer stores all downloaded packages in the vendor/ directory.
+  # Do not use the following if the vendor/ directory is commited to
+  # your git repository.
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-${CI_PIPELINE_ID}
+    untracked: true
+    when: on_success
+    policy: pull

@@ -1,0 +1,35 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+services:
+  drupal:
+    build:
+      context: ../../
+      dockerfile: container/release/build/web.dockerfile
+      args:
+        ARCHITECTURE: "${TARGET_ARCHITECTURE:-linux/x86_64}"
+        MARIADB_TAG: "${MARIADB_TAG:-10.11}"
+        NODE_MAJOR_VERSION: "${NODE_MAJOR_VERSION:-20}"
+        NPM_MAJOR_VERSION: "${NPM_MAJOR_VERSION:-}"
+        PHP_VERSION: "${PHP_VERSION:-8.3}"
+        CONTAINER_DIR: "${CONTAINER_DIR:-/var/www/html}"
+    container_name: "${COMPOSE_PROJECT_NAME:-drupal_project}_drupal"
+    image: "${COMPOSE_PROJECT_NAME:-drupal_project}/drupal"
+    environment:
+      COLUMNS: 80 # Set 80 columns for docker exec -it.
+      COMPOSER_VERSION: "${COMPOSER_VERSION:-2}"
+      CONTAINER_DIR: ${CONTAINER_DIR:-/var/www/html}
+      DB_DRIVER: ${DB_DRIVER:-mysql}
+      DB_HOST: ${DB_HOST:-mariadb}
+      DB_NAME: ${DB_NAME:-drupal}
+      DB_PASSWORD: ${DB_PASSWORD:-drupal}
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-password}
+      DB_USER: ${DB_USER:-drupal}
+      DF_DRUPAL_CONFIG_DIR: ${DF_DRUPAL_CONFIG_DIR:-../config/sync}
+      DF_DRUPAL_WEBROOT: ${DF_DRUPAL_WEBROOT:-web}
+      DF_ENV_TYPE: ${DF_ENV_TYPE:-prod}
+      PHP_MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-256M}
+      PHP_DISMOD: ${PHP_DISMOD:-ioncube,redis,soap,sqlite3,pdo_pgsql,amqp}
+      PROJECT_BASE_URL: ${PROJECT_BASE_URL:-dflocal.net}
+      WEB_ALIAS_DOMAIN: '*.${PROJECT_BASE_URL:-dflocal.net}'
+      WEB_DOCUMENT_ROOT: ${CONTAINER_DIR:-/var/www/html}/${DF_DRUPAL_WEBROOT:-web}

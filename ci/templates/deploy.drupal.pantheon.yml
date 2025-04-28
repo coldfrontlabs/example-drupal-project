@@ -1,0 +1,225 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Drupal deployment to Pantheon
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Pantheon deployment template.
+.deploy_pantheon_template:
+  stage: deploy
+  variables:
+    GIT_STRATEGY: none
+    GIT_LFS_SKIP_SMUDGE: 1
+    TERMINUS_HIDE_GIT_MODE_WARNING: 1
+    TERMINUS_VERSION: 3.4.0
+    DF_REMOTE_DEFAULT_BRANCH: master
+    SLEEP_POST_PUSH: 60s
+    DF_REMOTE_ORIGIN: git@example.com:example.git
+    DF_REMOTE_PUSH_ARGS: --no-verify
+    DF_REMOTE_COMMIT_ARGS: --no-verify
+    DF_REMOTE_CLONE_ARGS: --depth=1
+    DF_DRUPAL_WEBROOT: web
+  before_script:
+    - eval $(ssh-agent -s)
+    - test ! -z "$RUNNER_DEPLOY_KEY" && ssh-add <(echo "$RUNNER_DEPLOY_KEY" | base64 --decode)
+    - ssh-add -l
+    - mkdir -p bin
+    - export PATH="$(pwd)/bin:$(pwd)/vendor/bin:$PATH"
+    - export COMPOSER_PATH=$(which composer)
+    - >
+      if [ -z $COMPOSER_PATH ] || [ $COMPOSER_PATH == '/usr/local/bin/composer' ]; then
+        php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" \
+        && php -r "if (hash_file('SHA384', 'composer-setup.php') === '$COMPOSER_SHA') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;" \
+        && php composer-setup.php --install-dir=bin --filename=composer \
+        && php -r "unlink('composer-setup.php');" \
+        && echo "Composer installed" \
+        && composer self-update $COMPOSER_VERSION
+      fi
+    - composer --version
+    # Clone the repo and move the build artifact into place.
+    - find ./ -name '.git' -type d | xargs rm -rf
+    # Add known hosts entries.
+    # Known host entries cannot be used in Pantheon deployments.
+    # See: https://github.com/pantheon-systems/terminus/blob/74d23b228302e2744aeff63661a04720d52fba00/src/Commands/Remote/SSHBaseCommand.php#L285
+    - |
+      mkdir -p ~/.ssh || true
+      touch ~/.ssh/known_hosts
+      touch ~/.ssh/config
+      chmod 700 ~/.ssh
+      chmod 600 ~/.ssh/*
+      echo "$SSH_KNOWN_HOSTS" | base64 --decode >> ~/.ssh/known_hosts
+      echo "Host *" >> ~/.ssh/config
+      echo "  StrictHostKeyChecking no" >> ~/.ssh/config
+    - git clone $DF_REMOTE_CLONE_ARGS $DF_REMOTE_ORIGIN $CI_PROJECT_DIR/remote_repo --branch=$DF_REMOTE_DEFAULT_BRANCH
+    - rsync -r --cvs-exclude ./ $CI_PROJECT_DIR/remote_repo/ --delete --exclude-from=.rsync-exclude --include=core --quiet
+    - touch $CI_PROJECT_DIR/deploystatus.log
+    - |
+      cd $CI_PROJECT_DIR/remote_repo
+      git checkout $DF_DRUPAL_WEBROOT/sites
+      git add -A >> $CI_PROJECT_DIR/deploystatus.log
+      git status >> $CI_PROJECT_DIR/deploystatus.log
+      git config user.email "cirunner@dropfort.com" >> $CI_PROJECT_DIR/deploystatus.log
+      git config user.name "Dropfort CI Runner" >> $CI_PROJECT_DIR/deploystatus.log
+      git commit $DF_REMOTE_COMMIT_ARGS -m "Update build to $CI_COMMIT_REF_NAME" >> $CI_PROJECT_DIR/deploystatus.log
+      git push $DF_REMOTE_PUSH_ARGS origin $DF_REMOTE_DEFAULT_BRANCH >> $CI_PROJECT_DIR/deploystatus.log
+    # Install terminus to communicate with the Pantheon servers.
+    - curl -L https://github.com/pantheon-systems/terminus/releases/download/$TERMINUS_VERSION/terminus.phar --output bin/terminus
+    - chmod +x bin/terminus
+    # Use the machine token to connect (GitLab CI variables).
+    - php bin/terminus auth:login --machine-token=$MACHINE_TOKEN
+    # Wait for pantheon to finish deploying the code.
+    - sleep $SLEEP_POST_PUSH
+    # Turn on maintenance mode
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- state:set system.maintenance_mode 1 --input-format=integer
+    # Clear the dropfort update cache
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- state:delete dropfort_update.last_status
+    # Clear the env cache in Pantheon
+    - php bin/terminus env:clear-cache $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE
+  artifacts:
+    when: always
+    paths:
+      - $CI_PROJECT_DIR/deploystatus.log
+    expire_in: 1 month
+
+## Pantheon deployment exclude rules.
+.deploy_pantheon_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy"'
+      when: never
+    - if: '$TARGET_PLATFORM != "pantheon"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+
+
+########################################
+# Jobs.
+########################################
+
+## Dev deployment.
+#
+# Dev deploy will deploy to digital ocean and the pantheon dev site.
+#
+# For this to work:
+#   - Set the RUNNER_DEPLOY_KEY in the before script.
+#   - Add the runner public key in pantheon.
+#   - Configure the machine token and save in ci variables.
+deploy_pantheon_dev:
+  extends:
+    - .deploy_pantheon_template
+    - .dev_detect_template
+  dependencies:
+    - drupal_dev_build
+  variables:
+    DRUSH_ALIAS_TYPE: dev
+  script:
+    # Clear cache
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- cr
+    # Update database
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- updb -y
+    # Import config
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- config:import -y
+    # Clear cache
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- cr
+    # Turn off maintenance mode
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- state:set system.maintenance_mode 0 --input-format=integer
+  rules:
+    - if: '$SKIP_JOBS =~ /deploy_pantheon_dev/'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /chore\(release\)/'
+      when: never
+    - !reference [.deploy_pantheon_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+## QA deployment.
+deploy_pantheon_qa:
+  extends:
+    - .deploy_pantheon_template
+    - .qa_detect_template
+  dependencies:
+    - drupal_release_build
+  variables:
+    DRUSH_ALIAS_TYPE: test
+  script:
+    # Deploy code to test
+    - php bin/terminus env:deploy $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE --sync-content --cc --updatedb --note="Deploy configuration to test"
+    # Clear cache
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- cr
+    # Update database
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- updb -y
+    # Import config
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- config:import -y
+    # Clear cache
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- cr
+    # Turn off maintenance mode
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- state:set system.maintenance_mode 0 --input-format=integer
+    # Block user 1
+    - export DF_ADMIN_USER=`php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- uinf --uid=1 --field=name`
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- ublk $DF_ADMIN_USER
+  rules:
+    - if: '$SKIP_JOBS =~ /deploy_pantheon_qa/'
+      when: never
+    - !reference [.deploy_pantheon_exclude_rules, rules]
+    - !reference [.qa_detect_include_rules, rules]
+
+## Production deployment.
+deploy_pantheon_prod:
+  extends:
+    - .deploy_pantheon_template
+    - .prod_detect_template
+  dependencies:
+    - drupal_release_build
+  variables:
+    DRUSH_ALIAS_TYPE: live
+  when: manual
+  allow_failure: false
+  script:
+    # Deploy code to live site
+    - php bin/terminus env:deploy $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE --cc --note="Deploy configuration to live"
+    # Clear cache
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- cr
+    # Update database
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- updb -y
+    # Import config
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- config:import -y
+    # Clear cache
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- cr
+    # Turn off maintenance mode
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- state:set system.maintenance_mode 0 --input-format=integer
+    # Block user 1
+    - export DF_ADMIN_USER=`php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- uinf --uid=1 --field=name`
+    - php bin/terminus drush $DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE -- ublk $DF_ADMIN_USER
+  rules:
+    - if: '$SKIP_JOBS =~ /deploy_pantheon_prod/'
+      when: never
+    - if: $CI_DEPLOY_FREEZE != null
+      when: never
+    - !reference [.deploy_pantheon_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]

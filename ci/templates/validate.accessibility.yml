@@ -1,0 +1,145 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Accessibility tests.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Standard accessibility regression test template.
+.accessibility_axe_template:
+  stage: validate
+  environment:
+    action: access
+  script:
+    - npm i $NPM_ARGS
+    # Run the acceptance suite.
+    - echo DF_SELENIUM=$DF_SELENIUM_HOST >> .env.ci
+    - echo DF_SELENIUM_PORT=$DF_SELENIUM_PORT >> .env.ci
+    - echo DF_SHIELD_USER=$DF_SHIELD_USER >> .env.ci
+    - echo DF_SHIELD_PW=$DF_SHIELD_PW >> .env.ci
+    - echo DF_TEST_HOST=$(drush sa @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE --format=json | jq -r '.[].uri') >> .env.ci
+    - echo DF_REF_HOST=$(drush sa @$DRUSH_ALIAS_GROUP.prod --format=json | jq -r '.[].uri') >> .env.ci
+    - npx node-env-run --exec 'npm run test:accessibility:axe' --env .env.ci --force
+  artifacts:
+    name: "$CI_PROJECT_NAME-$CI_COMMIT_REF_NAME-axe_report"
+    expire_in: 2 days
+    paths:
+      - testing/axe/reports
+    reports:
+      junit: testing/axe/reports/xunit/*_results.xml
+    when: always
+
+## Accessibility lighthouse regression test template.
+.accessibility_lighthouse_template:
+  stage: validate
+  script:
+    - npm i $NPM_ARGS
+    # Run the acceptance suite.
+    - echo DF_SELENIUM=$DF_SELENIUM_HOST >> .env.ci
+    - echo DF_SELENIUM_PORT=$DF_SELENIUM_PORT >> .env.ci
+    - echo DF_SHIELD_USER=$DF_SHIELD_USER >> .env.ci
+    - echo DF_SHIELD_PW=$DF_SHIELD_PW >> .env.ci
+    - echo DF_TEST_HOST=$(drush sa @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE --format=json | jq -r '.[].uri') >> .env.ci
+    - echo DF_REF_HOST=$(drush sa @$DRUSH_ALIAS_GROUP.prod --format=json | jq -r '.[].uri') >> .env.ci
+    - npx node-env-run --exec 'npm run test:accessibility:lighthouse' --env .env.ci --force
+  artifacts:
+    name: "$CI_PROJECT_NAME-$CI_COMMIT_REF_NAME-lighhouse_data"
+    expire_in: 2 days
+    paths:
+      - testing/lighthouse/reports
+    when: always
+
+## Accesibility exclude rules.
+.accessibility_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy" && $TARGET_PIPELINE != "validation"'
+      when: never
+    - if: '$SKIP_VALIDATE == "true"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[skip validate\]/'
+      when: never
+
+########################################
+# Jobs.
+########################################
+
+## Feature accessibility tests.
+validate_feature_axe_a11y:
+  extends:
+    - .accessibility_axe_template
+    - .feature_detect_template
+  variables:
+    DF_TEST_HOST: 'http://example.com'
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_feature_axe_a11y/'
+      when: never
+    - !reference [.accessibility_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]
+
+## Dev accessibility tests.
+validate_dev_axe_a11y:
+  extends:
+    - .accessibility_axe_template
+    - .dev_detect_template
+  variables:
+    DF_TEST_HOST: 'http://example.com'
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_dev_axe_a11y/'
+      when: never
+    - !reference [.accessibility_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+## QA accessibility tests.
+validate_qa_axe_a11y:
+  extends:
+    - .accessibility_axe_template
+    - .qa_detect_template
+  variables:
+    DF_TEST_HOST: 'http://example.com'
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_qa_axe_a11y/'
+      when: never
+    - !reference [.accessibility_exclude_rules, rules]
+    - !reference [.qa_detect_no_env_exclude_rules, rules]
+    - !reference [.qa_detect_include_rules, rules]
+
+## Prod accessibility tests.
+validate_prod_axe_a11y:
+  extends:
+    - .accessibility_axe_template
+    - .prod_detect_template
+  variables:
+    DF_TEST_HOST: 'http://example.com'
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_prod_axe_a11y/'
+      when: never
+    - !reference [.accessibility_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]

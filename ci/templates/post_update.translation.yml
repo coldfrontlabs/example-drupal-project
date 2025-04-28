@@ -1,0 +1,131 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Update/Import Translations.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Update translations template.
+.update_translations_template:
+  stage: post_update
+  allow_failure: true
+  timeout: 3h
+  environment:
+    action: access
+  variables:
+    LOCALE_DIRECTORY: translations
+    LOCALE_IMPORT_ARGS: ''
+    LOCALE_CHECK: true
+    LOCALE_UPDATE: true
+  script:
+    # Import translations
+    # If LOCALE_CHECK is true, check for existing translations and update them.
+    - >
+      if [ ! -z "$LOCALE_CHECK" ]; then
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE locale:check
+      fi
+    # If LOCALE_UPDATE is true, update the translations.
+    - >
+      if [ ! -z "$LOCALE_UPDATE" ]; then
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE locale:update
+      fi
+    # Scan the LOCATE_DIRECTORY for .po files and import them.
+    # @todo replace with `drush locale:import-all` once available.
+    - >
+      for LOCALE_FILEPATH in $LOCALE_DIRECTORY/*.po; do
+        LOCALE_LANGCODE=$(basename $LOCALE_FILEPATH .po)
+        drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE locale:import $LOCALE_LANGCODE $LOCALE_FILEPATH $LOCALE_IMPORT_ARGS || true
+      done
+
+## Update translations exclude rules.
+.update_translations_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy"'
+      when: never
+    - if: '$TARGET_PLATFORM == "pantheon"'
+      when: never
+    - if: '$TARGET_PLATFORM == "acquia"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[validate only\]/'
+      when: never
+
+########################################
+# Jobs.
+########################################
+
+## Feature update.
+update_translation_feature:
+  extends:
+    - .update_translations_template
+    - .feature_detect_template
+  environment:
+    url: https://$CI_COMMIT_REF_SLUG.$DF_TLD
+  when: manual
+  rules:
+    - if: '$SKIP_JOBS =~ /update_translations_feature/'
+      when: never
+    - !reference [.update_translations_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]
+
+## Dev update.
+update_translations_dev:
+  extends:
+    - .update_translations_template
+    - .dev_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /update_translations_dev/'
+      when: never
+    - !reference [.update_translations_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+## QA update.
+update_translations_qa:
+  extends:
+    - .update_translations_template
+    - .qa_detect_template
+  rules:
+    - if: '$SKIP_JOBS =~ /update_translations_qa/'
+      when: never
+    - !reference [.update_translations_exclude_rules, rules]
+    - !reference [.qa_detect_no_env_exclude_rules, rules]
+    - !reference [.qa_detect_include_rules, rules]
+
+## Prod update.
+update_translations_prod:
+  extends:
+    - .update_translations_template
+    - .prod_detect_template
+  allow_failure: false
+  rules:
+    - if: '$SKIP_JOBS =~ /update_translations_prod/'
+      when: never
+    - !reference [.update_translations_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]

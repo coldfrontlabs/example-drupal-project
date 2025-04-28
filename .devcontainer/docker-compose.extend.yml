@@ -1,0 +1,10 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+services:
+  drupal:
+    environment:
+      XDEBUG_SESSION: vscode
+      php.xdebug.discover_client_host: 0
+      php.xdebug.client_port: 9003
+      php.xdebug.client_host: "${COMPOSE_PROJECT_NAME:-drupal_project}_drupal"

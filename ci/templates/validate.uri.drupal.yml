@@ -1,0 +1,119 @@
+# This file is managed by dropfort/dropfort_build.
+# Modifications to this file will be overwritten by default.
+
+# Copyright (c) 2022 Coldfront Labs Inc.
+
+# This file is part of DropfortCI Scripts.
+
+# DropfortCI Scripts is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# DropfortCI Scripts is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with DropfortCI Scripts.  If not, see <https://www.gnu.org/licenses/>.
+
+
+########################################
+# Drupal URI test.
+########################################
+
+
+########################################
+# Templates.
+########################################
+
+## Drush URI template.
+.drush_uri_template:
+  stage: validate
+  environment:
+    action: access
+  script:
+    # Test that drush has a URI associated to the Drupal site.
+    # We don't run the status through the alias directly specifically so we can test the drush settings on the remote.
+    - DRUSH_ALIAS_URI=$(drush $DRUSH_SITE_ALIAS_OPTIONS --ssh-options="$DRUSH_SSH_OPTIONS" @$DRUSH_ALIAS_GROUP.$DRUSH_ALIAS_TYPE ssh 'drush status --field=uri --local')
+    - DRUSH_ALIAS_URI=${DRUSH_ALIAS_URI#'http://default'}
+    - DRUSH_ALIAS_URI=${DRUSH_ALIAS_URI#'https://default'}
+    - DRUSH_ALIAS_URI=${DRUSH_ALIAS_URI#'default'}
+    - echo $DRUSH_ALIAS_URI
+    - test ! -z "${DRUSH_ALIAS_URI// }"
+
+## Drush URI exclude rules.
+.drush_uri_exclude_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$TARGET_PIPELINE != "all" && $TARGET_PIPELINE != "build_and_deploy" && $TARGET_PIPELINE != "validation"'
+      when: never
+    - if: '$TARGET_PLATFORM == "pantheon"'
+      when: never
+    - if: '$SKIP_VALIDATE == "true"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[skip validate\]/'
+      when: never
+
+
+########################################
+# Jobs.
+########################################
+
+## Feature URI validation.
+validate_feature_uri:
+  extends:
+    - .drush_uri_template
+    - .feature_detect_template
+  dependencies:
+    - drupal_dev_build
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_feature_uri/'
+      when: never
+    - !reference [.drush_uri_exclude_rules, rules]
+    - !reference [.feature_detect_exclude_rules, rules]
+    - !reference [.feature_detect_no_env_exclude_rules, rules]
+    - !reference [.feature_detect_include_rules, rules]
+
+## Dev URI validation.
+validate_dev_uri:
+  extends:
+    - .drush_uri_template
+    - .dev_detect_template
+  dependencies:
+    - drupal_dev_build
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_dev_uri/'
+      when: never
+    - !reference [.drush_uri_exclude_rules, rules]
+    - !reference [.dev_detect_exclude_rules, rules]
+    - !reference [.dev_detect_include_rules, rules]
+
+## QA URI validation.
+validate_qa_uri:
+  extends:
+    - .drush_uri_template
+    - .qa_detect_template
+  dependencies:
+    - drupal_release_build
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_qa_uri/'
+      when: never
+    - !reference [.drush_uri_exclude_rules, rules]
+    - !reference [.qa_detect_no_env_exclude_rules, rules]
+    - !reference [.qa_detect_include_rules, rules]
+
+## Prod URI validation.
+validate_prod_uri:
+  extends:
+    - .drush_uri_template
+    - .prod_detect_template
+  dependencies:
+    - drupal_release_build
+  rules:
+    - if: '$SKIP_JOBS =~ /validate_prod_uri/'
+      when: never
+    - !reference [.drush_uri_exclude_rules, rules]
+    - !reference [.prod_detect_include_rules, rules]

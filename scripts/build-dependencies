@@ -1,0 +1,142 @@
+#!/bin/bash
+
+# A script to build all custom modules and themes within the Drupal webroot.
+#
+# This script can take the following arguments:
+#  --environment=prod|dev
+#    The environment to build for.
+#     Default: prod
+#  --type=all|module|theme
+#    The type of build to run.
+#     Default: all
+#  --exclude=string
+#    A comma separated list of module/theme names to exclude from the build.
+#  --include=string
+#    A comma separated list of module/theme names to include in the build.
+#  --clean
+#    If set, the script will clean the dependencies before building.
+
+build() {
+  # Get a list of all the directories in the modules/custom and themes/custom directories.
+  MODULES=$(find "$DF_DRUPAL_WEBROOT/modules/custom" -maxdepth 1 -mindepth 1 -type d)
+  THEMES=$(find "$DF_DRUPAL_WEBROOT/themes/custom" -maxdepth 1 -mindepth 1 -type d)
+  DEPENDENCIES=""
+
+  # Set the default arguments.
+  ENVIRONMENT="prod"
+  TYPE="all"
+  EXCLUDE=""
+  INCLUDE=""
+  CLEAN=false
+  BUILD_EXIT_CODE=0
+
+  # Parse the arguments.
+  for i in "$@"
+    do
+    case $i in
+        --environment=*)
+        ENVIRONMENT="${i#*=}"
+        ;;
+        --type=*)
+        TYPE="${i#*=}"
+        ;;
+        --exclude=*)
+        EXCLUDE="${i#*=}"
+        ;;
+        --include=*)
+        INCLUDE="${i#*=}"
+        ;;
+        --clean)
+        CLEAN=true
+        ;;
+        *)
+        # Ignore unknown options.
+        ;;
+    esac
+  done
+
+  echo "Gathering dependencies to build."
+
+  # Set the directories to build based on the type, include, and exclude arguments.
+  if [ "$TYPE" == "all" ] || [ "$TYPE" == "module" ]; then
+    for module in $MODULES; do
+      MODULE_NAME=$(basename $module)
+      if [[ $INCLUDE == "" ]] && [[ $EXCLUDE == "" ]]; then
+        DEPENDENCIES="$DEPENDENCIES $module"
+      elif [[ $INCLUDE != "" ]] && [[ $INCLUDE == *"$MODULE_NAME"* ]]; then
+        DEPENDENCIES="$DEPENDENCIES $module"
+      elif [[ $EXCLUDE != "" ]] && [[ $EXCLUDE != *"$MODULE_NAME"* ]]; then
+        DEPENDENCIES="$DEPENDENCIES $module"
+      fi
+    done
+  fi
+
+  if [ "$TYPE" == "all" ] || [ "$TYPE" == "theme" ]; then
+    for theme in $THEMES; do
+      THEME_NAME=$(basename $theme)
+      if [[ $INCLUDE == "" ]] && [[ $EXCLUDE == "" ]]; then
+        DEPENDENCIES="$DEPENDENCIES $theme"
+      elif [[ $INCLUDE != "" ]] && [[ $INCLUDE == *"$THEME_NAME"* ]]; then
+        DEPENDENCIES="$DEPENDENCIES $theme"
+      elif [[ $EXCLUDE != "" ]] && [[ $EXCLUDE != *"$THEME_NAME"* ]]; then
+        DEPENDENCIES="$DEPENDENCIES $theme"
+      fi
+    done
+  fi
+
+  echo "Building $TYPE for $ENVIRONMENT."
+
+  if [[ $INCLUDE != "" ]]; then
+    echo "Including: $INCLUDE"
+  fi
+
+  if [[ $EXCLUDE != "" ]]; then
+    echo "Excluding: $EXCLUDE"
+  fi
+
+  # Build the dependencies asynchronously.
+  pids=''
+  for dependency in $DEPENDENCIES; do
+    if [ -f "$dependency/package.json" ]; then
+      if grep -q "build:$ENVIRONMENT" "$dependency/package.json"; then
+        echo "Building $dependency"
+        (
+          build_dependency "$ENVIRONMENT" "$dependency" "$CLEAN"
+        ) &
+        pids+=" $!"
+      fi
+    fi
+  done
+
+  # Wait for the builds to finish.
+  for p in $pids; do
+    if wait $p; then
+      echo "Process $p success"
+    else
+      # Mark the build as bad if any process fails to build.
+      echo "Process $p fail"
+      BUILD_EXIT_CODE=1
+    fi
+  done
+
+  echo "All builds have finished."
+  exit $BUILD_EXIT_CODE
+}
+
+build_dependency() {
+  ENVIRONMENT=$1
+  dependency=$2
+  CLEAN=$3
+
+  echo "Building $(basename $dependency)."
+
+  if [ "$CLEAN" = true ]; then
+    echo "Cleaning $(basename $dependency)."
+    npm run clean --prefix "$dependency" --if-present
+  fi
+
+  npm install --prefix "$dependency"
+  npm run build:"$ENVIRONMENT" --prefix "$dependency" --if-present
+}
+
+build "$@"
