@@ -208,6 +208,21 @@ display:
         - 'languages:language_interface'
         - user.permissions
       tags: {  }
+  page_1:
+    id: page_1
+    display_title: Page
+    display_plugin: page
+    position: 2
+    display_options:
+      display_extenders: {  }
+      path: whos-online
+    cache_metadata:
+      max-age: -1
+      contexts:
+        - 'languages:language_content'
+        - 'languages:language_interface'
+        - user.permissions
+      tags: {  }
   who_s_online_block:
     id: who_s_online_block
     display_title: "Who's online"
